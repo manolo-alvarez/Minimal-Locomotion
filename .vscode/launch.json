@@ -1,0 +1,36 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "zbot_eval (mps)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "genesis_playground/zbot/zbot_eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-e", "zbot-walking", 
+                "--ckpt", "100", 
+                "--device", "mps", 
+                "--analyze", 
+                "--show_viewer"
+            ]
+        },
+        {
+            "name": "zbot_eval (cuda)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "genesis_playground/zbot/zbot_eval",
+            "console": "integratedTerminal",
+            "args": [
+                "-e", "zbot-walking", 
+                "--ckpt", "100", 
+                "--device", "cuda", 
+                "--analyze", 
+                "--show_viewer"
+            ]
+        }
+    ]
+}

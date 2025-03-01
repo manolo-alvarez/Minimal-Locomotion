@@ -154,6 +154,11 @@ class PolicyAnalyzer:
         
         plt.figure(figsize=(14, 8))
         
+        # Set a more professional style if seaborn is available
+        if HAS_SEABORN:
+            sns.set_style("whitegrid")
+            sns.set_context("paper", font_scale=1.2)
+        
         # Extract data
         means = self.obs_stats['mean'].cpu().numpy()
         stds = self.obs_stats['std'].cpu().numpy()
@@ -165,21 +170,36 @@ class PolicyAnalyzer:
         sorted_labels = [self.obs_labels[i] for i in indices]
         
         x = np.arange(len(sorted_labels))
-        plt.errorbar(x, means[indices], yerr=stds[indices], fmt='o', label='Mean ± Std')
-        plt.scatter(x, mins[indices], marker='_', color='red', label='Min')
-        plt.scatter(x, maxs[indices], marker='_', color='green', label='Max')
         
-        plt.axhline(y=0, color='grey', linestyle='--', alpha=0.7)
-        plt.xlabel('Features')
-        plt.ylabel('Value')
-        plt.title('Feature Statistics (Sorted by Standard Deviation)')
-        plt.xticks(x, sorted_labels, rotation=90)
-        plt.legend()
+        # Plot with nicer styling
+        plt.errorbar(x, means[indices], yerr=stds[indices], fmt='o', 
+                    color='#3498db', ecolor='#2980b9', capsize=5, 
+                    label='Mean ± Std', alpha=0.8)
+        plt.scatter(x, mins[indices], marker='_', color='#e74c3c', s=100, 
+                   label='Min', alpha=0.7)
+        plt.scatter(x, maxs[indices], marker='_', color='#2ecc71', s=100, 
+                   label='Max', alpha=0.7)
+        
+        plt.axhline(y=0, color='grey', linestyle='--', alpha=0.5)
+        plt.xlabel('Features', fontweight='bold')
+        plt.ylabel('Value', fontweight='bold')
+        plt.title('Feature Statistics (Sorted by Variability)', fontsize=14, fontweight='bold')
+        
+        # Limit the number of x-tick labels if there are many features
+        if len(sorted_labels) > 15:
+            step = max(1, len(sorted_labels) // 15)
+            plt.xticks(x[::step], [sorted_labels[i] for i in range(0, len(sorted_labels), step)], 
+                      rotation=45, ha='right')
+        else:
+            plt.xticks(x, sorted_labels, rotation=45, ha='right')
+        
+        plt.legend(frameon=True, fancybox=True, framealpha=0.9, loc='best')
+        plt.grid(True, alpha=0.3)
         plt.tight_layout()
         
         plt.savefig(f"{self.save_dir}/feature_statistics.png", dpi=300, bbox_inches='tight')
         plt.close()
-        
+
     def plot_top_features_by_sensitivity(self, top_k: int = 20, normalized: bool = True):
         """
         Plot top features by sensitivity.
@@ -192,6 +212,11 @@ class PolicyAnalyzer:
             print("No sensitivity computed. Run compute_sensitivity first.")
             return
         
+        # Set a more professional style if seaborn is available
+        if HAS_SEABORN:
+            sns.set_style("whitegrid")
+            sns.set_context("paper", font_scale=1.3)
+        
         # Choose sensitivity matrix
         sensitivity = self.normalized_sensitivity_matrix if normalized else self.sensitivity_matrix
         
@@ -203,23 +228,39 @@ class PolicyAnalyzer:
         top_k = min(top_k, len(sorted_indices))  # Ensure we don't exceed number of features
         top_indices = sorted_indices[:top_k]
         
-        plt.figure(figsize=(10, 8))
+        plt.figure(figsize=(12, 10))
         
         # Get feature labels and importance values
         labels = [self.obs_labels[i] for i in top_indices]
         values = feature_importance[top_indices]
         
-        # Create horizontal bar chart
-        plt.barh(np.arange(len(labels)), values, align='center')
-        plt.yticks(np.arange(len(labels)), labels)
-        plt.xlabel('Sensitivity (L2 norm across actions)')
-        plt.title(f'Top {top_k} Features by {"Normalized " if normalized else ""}Sensitivity')
+        # Create horizontal bar chart with better styling
+        colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(values)))
+        bars = plt.barh(np.arange(len(labels)), values, align='center', 
+                       color=colors, alpha=0.8, height=0.7)
+        
+        # Add value labels at the end of each bar
+        for i, (bar, value) in enumerate(zip(bars, values)):
+            plt.text(value + 0.01, bar.get_y() + bar.get_height()/2, 
+                    f'{value:.3f}', va='center', fontsize=9)
+        
+        # Improve aesthetics
+        plt.yticks(np.arange(len(labels)), labels, fontsize=11)
+        plt.xlabel('Sensitivity (L2 norm across actions)', fontweight='bold')
+        title = f'Top {top_k} Most Influential Features'
+        if normalized:
+            title += ' (Normalized by Feature Range)'
+        plt.title(title, fontsize=14, fontweight='bold')
+        
+        # Add grid only on x-axis
+        plt.grid(axis='x', alpha=0.3)
+        
         plt.tight_layout()
         
         plt.savefig(f"{self.save_dir}/top_features_{'normalized' if normalized else 'raw'}.png", 
                    dpi=300, bbox_inches='tight')
         plt.close()
-    
+
     def plot_feature_action_heatmap(self, top_k_features: int = 20, top_k_actions: Optional[int] = None):
         """
         Plot heatmap of feature-action sensitivities.
@@ -251,33 +292,130 @@ class PolicyAnalyzer:
         # Extract subset of sensitivity matrix
         subset_sensitivity = abs_sensitivity[np.ix_(feature_indices, action_indices)]
         
-        plt.figure(figsize=(12, 10))
+        plt.figure(figsize=(16, 12))
         
         # Use either seaborn or matplotlib for the heatmap
         if HAS_SEABORN:
+            # Set style first
+            sns.set_style("white")
+            sns.set_context("paper", font_scale=1.2)
+            
+            # Custom diverging colormap with white in the middle
+            cmap = sns.diverging_palette(230, 20, as_cmap=True)
+            
+            # Create a mask for very low values to make the heatmap cleaner
+            mask = subset_sensitivity < (np.max(subset_sensitivity) * 0.05)
+            
+            # Plot heatmap with improved styling
             ax = sns.heatmap(
                 subset_sensitivity,
                 cmap='viridis',
                 xticklabels=[self.action_labels[i] for i in action_indices],
                 yticklabels=[self.obs_labels[i] for i in feature_indices],
-                cbar_kws={'label': 'Absolute Normalized Sensitivity'}
+                cbar_kws={'label': 'Absolute Normalized Sensitivity'},
+                annot=True,  # Add values in cells
+                fmt=".2f",   # Format for the annotations
+                linewidths=0.5,
+                mask=mask,
+                square=False
             )
-        else:
-            # Matplotlib alternative to seaborn heatmap
-            plt.imshow(subset_sensitivity, cmap='viridis', aspect='auto')
-            plt.colorbar(label='Absolute Normalized Sensitivity')
             
-            # Set x and y ticks
+            # Rotate x labels for better readability
+            plt.xticks(rotation=45, ha='right')
+            
+        else:
+            # Matplotlib alternative to seaborn heatmap with improved styling
+            plt.imshow(subset_sensitivity, cmap='viridis', aspect='auto')
+            cbar = plt.colorbar(label='Absolute Normalized Sensitivity')
+            cbar.ax.set_ylabel('Absolute Normalized Sensitivity', fontweight='bold')
+            
+            # Add text annotations in each cell
+            for i in range(len(feature_indices)):
+                for j in range(len(action_indices)):
+                    if subset_sensitivity[i, j] > (np.max(subset_sensitivity) * 0.05):
+                        plt.text(j, i, f'{subset_sensitivity[i, j]:.2f}', 
+                                ha="center", va="center", 
+                                color="white" if subset_sensitivity[i, j] > np.max(subset_sensitivity)/2 else "black",
+                                fontsize=8)
+            
+            # Set x and y ticks with better formatting
             plt.yticks(np.arange(len(feature_indices)), 
                       [self.obs_labels[i] for i in feature_indices])
             plt.xticks(np.arange(len(action_indices)), 
                       [self.action_labels[i] for i in action_indices], 
                       rotation=45, ha='right')
         
-        plt.title('Feature-Action Sensitivity Heatmap')
+        plt.title('Feature-Action Sensitivity Heatmap', fontsize=16, fontweight='bold')
         plt.tight_layout()
         
         plt.savefig(f"{self.save_dir}/feature_action_heatmap.png", dpi=300, bbox_inches='tight')
+        plt.close()
+    
+    def plot_feature_distributions(self, observations: torch.Tensor, max_features: int = 12):
+        """
+        Plot histograms of feature distributions.
+        
+        Args:
+            observations: Tensor of observations [num_samples, obs_dim]
+            max_features: Maximum number of features to plot
+        """
+        if HAS_SEABORN:
+            sns.set_style("whitegrid")
+            sns.set_context("paper", font_scale=1.2)
+        
+        # Get feature importance if available
+        if self.normalized_sensitivity_matrix is not None:
+            sensitivity = torch.norm(self.normalized_sensitivity_matrix, dim=1).cpu().numpy()
+            feature_order = np.argsort(sensitivity)[::-1]
+        else:
+            # Otherwise sort by standard deviation
+            feature_order = np.argsort(self.obs_stats['std'].cpu().numpy())[::-1]
+        
+        # Select top features
+        selected_features = feature_order[:max_features]
+        
+        # Create subplot grid
+        n_cols = min(3, max_features)
+        n_rows = (max_features + n_cols - 1) // n_cols
+        
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(15, 3 * n_rows))
+        axes = axes.flatten() if n_rows * n_cols > 1 else [axes]
+        
+        # Plot histograms
+        observations_np = observations.cpu().numpy()
+        
+        for i, feature_idx in enumerate(selected_features):
+            if i >= len(axes):
+                break
+                
+            ax = axes[i]
+            feature_data = observations_np[:, feature_idx]
+            feature_name = self.obs_labels[feature_idx]
+            
+            # Plot distribution with KDE if seaborn is available
+            if HAS_SEABORN:
+                sns.histplot(feature_data, kde=True, ax=ax, color='#3498db', bins=20)
+            else:
+                ax.hist(feature_data, bins=20, alpha=0.7, color='#3498db')
+                
+            ax.set_title(f"{feature_name}", fontsize=10)
+            ax.set_xlabel("Value")
+            ax.set_ylabel("Count")
+            
+            # Add mean and std annotation
+            mean = np.mean(feature_data)
+            std = np.std(feature_data)
+            ax.axvline(mean, color='red', linestyle='--', alpha=0.8)
+            ax.text(0.05, 0.95, f"Mean: {mean:.2f}\nStd: {std:.2f}", 
+                   transform=ax.transAxes, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+        
+        # Hide unused subplots
+        for i in range(len(selected_features), len(axes)):
+            axes[i].axis('off')
+        
+        plt.tight_layout()
+        plt.savefig(f"{self.save_dir}/feature_distributions.png", dpi=300, bbox_inches='tight')
         plt.close()
     
     def run_full_analysis(
@@ -317,6 +455,7 @@ class PolicyAnalyzer:
         # Generate plots
         print("Generating plots...")
         self.plot_feature_statistics()
+        self.plot_feature_distributions(observations, max_features=12)  # New plot!
         self.plot_top_features_by_sensitivity(top_k=top_k, normalized=True)
         self.plot_top_features_by_sensitivity(top_k=top_k, normalized=False)
         self.plot_feature_action_heatmap(top_k_features=top_k)
@@ -349,36 +488,63 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
     obs, _ = env.get_observations()
     obs_dim = obs.shape[1]
     
-    # Create meaningful observation labels
-    # These are examples based on your keyboard control function
-    # Adjust these based on your actual observation space
-    base_obs_labels = [
-        "root_h",          # Root height
-        "root_roll",       # Root roll orientation
-        "root_pitch",      # Root pitch orientation
-        "root_yaw",        # Root yaw orientation
-        "root_vx",         # Root x velocity
-        "root_vy",         # Root y velocity
-        "command_x",       # Forward command
-        "command_y",       # Lateral command 
-        "command_yaw"      # Turn command
-    ]
+    # Try to get the actual observation labels from the environment
+    try:
+        # First try to use the environment's get_observation_labels method
+        obs_labels = env.get_observation_labels()
+        print("Using observation labels from environment")
+    except (AttributeError, NotImplementedError):
+        # If that fails, use standard ZBot observation labels
+        obs_labels = [
+            "base_height",       # Base height
+            "base_orientation[0]", # Roll
+            "base_orientation[1]", # Pitch
+            "base_orientation[2]", # Yaw
+            "base_lin_vel[0]",    # Linear velocity x
+            "base_lin_vel[1]",    # Linear velocity y
+            "base_lin_vel[2]",    # Linear velocity z
+            "command[0]",         # Forward command
+            "command[1]",         # Lateral command 
+            "command[2]",         # Turn command
+        ]
+        
+        # For joint positions and velocities
+        num_joints = (obs_dim - len(obs_labels)) // 2  # Assuming remaining obs are split between pos/vel
+        
+        if num_joints > 0:
+            for i in range(num_joints):
+                obs_labels.append(f"joint_pos_{i}")
+            for i in range(num_joints):
+                obs_labels.append(f"joint_vel_{i}")
+        
+        # If we still don't have enough labels, add generic ones
+        if len(obs_labels) < obs_dim:
+            obs_labels.extend([f"feature_{i+len(obs_labels)}" for i in range(obs_dim - len(obs_labels))])
+            
+        print(f"Using default ZBot observation labels with {num_joints} joints")
     
-    # Fill remaining observation dimensions with generic labels
-    obs_labels = base_obs_labels.copy()
-    if obs_dim > len(obs_labels):
-        obs_labels.extend([f"Feature_{i+len(base_obs_labels)}" for i in range(obs_dim - len(base_obs_labels))])
-    
-    # Create action labels
-    with torch.no_grad():
-        test_action = policy(obs)
-    action_dim = test_action.shape[1]
-    action_labels = [f"Joint_{i}" for i in range(action_dim)]
+    # Try to get action labels from the environment
+    try:
+        action_labels = env.get_action_labels()
+    except (AttributeError, NotImplementedError):
+        # Use test action to determine action dimensionality
+        with torch.no_grad():
+            test_action = policy(obs)
+        action_dim = test_action.shape[1]
+        
+        # Create action labels based on expected ZBot joint structure
+        action_labels = []
+        
+        # Typical ZBot has 8 joints, but we'll make it flexible
+        for i in range(action_dim):
+            joint_name = f"joint_{i//3}"
+            axis_name = ["x", "y", "z"][i % 3]
+            action_labels.append(f"{joint_name}_{axis_name}")
     
     print(f"Observation space: {obs_dim} dimensions")
-    print(f"Action space: {action_dim} dimensions")
+    print(f"Action space: {len(action_labels)} dimensions")
     
-    # Create analyzer
+    # Create analyzer with proper labels
     analyzer = PolicyAnalyzer(
         policy=policy,
         obs_labels=obs_labels,
@@ -387,7 +553,7 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
         save_dir=save_dir
     )
     
-    # Collect samples
+    # Collect samples - rest of function remains the same
     print(f"Collecting {num_samples} samples for analysis...")
     observations = []
     
@@ -400,9 +566,25 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
     for i in range(num_samples):
         # Apply fixed command to observation
         obs_copy = obs.clone()
-        obs_copy[:, 6] = fixed_cmd["x"]
-        obs_copy[:, 7] = fixed_cmd["y"]
-        obs_copy[:, 8] = fixed_cmd["yaw"]
+        
+        # Try to locate the command indices (usually 6,7,8 in ZBot but could be different)
+        cmd_indices = None
+        for idx, label in enumerate(obs_labels):
+            if "command" in label.lower():
+                if cmd_indices is None:
+                    cmd_indices = []
+                cmd_indices.append(idx)
+        
+        # Apply commands at the right indices
+        if cmd_indices and len(cmd_indices) >= 3:
+            obs_copy[:, cmd_indices[0]] = fixed_cmd["x"]
+            obs_copy[:, cmd_indices[1]] = fixed_cmd["y"]
+            obs_copy[:, cmd_indices[2]] = fixed_cmd["yaw"]
+        else:
+            # Fallback to standard indices
+            obs_copy[:, 6] = fixed_cmd["x"]
+            obs_copy[:, 7] = fixed_cmd["y"]
+            obs_copy[:, 8] = fixed_cmd["yaw"]
         
         # Get action
         with torch.no_grad():

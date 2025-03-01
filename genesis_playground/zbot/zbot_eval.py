@@ -178,6 +178,9 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
         save_dir: Directory to save analysis results
         num_samples: Number of samples to collect
         device: Device to run on
+    
+    Returns:
+        PolicyAnalyzer: The analyzer with results
     """
     # Import the policy analyzer
     from policy_analyzer import PolicyAnalyzer
@@ -212,15 +215,27 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
     obs, _ = env.get_observations()
     
     for i in range(num_samples):
+        # Apply fixed command to observation
+        obs_copy = obs.clone()
+        
         # Get action
         with torch.no_grad():
-            action = policy(obs)
+            action = policy(obs_copy)
         
-        # Step environment
-        obs, _, _, _, _ = env.step(action)
+        # Step environment - handling different return formats
+        result = env.step(action)
+        
+        # Handle different return formats
+        if len(result) == 4:  # obs, rew, done, info
+            obs, _, _, _ = result
+        elif len(result) == 5:  # obs, rew, done, info, extras
+            obs, _, _, _, _ = result
+        else:
+            # Fallback - assume first element is observation
+            obs = result[0]
         
         # Store observation
-        observations.append(obs[0].clone())  # Store first environment's observation
+        observations.append(obs_copy[0].clone())  # Store modified observation
         
         # Progress
         if (i+1) % (num_samples // 10) == 0:
