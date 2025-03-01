@@ -189,7 +189,7 @@ class WandbOnPolicyRunner(OnPolicyRunner):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="zbot-walking")
-    parser.add_argument("-B", "--num_envs", type=int, default=10)
+    parser.add_argument("-B", "--num_envs", type=int, default=4096)
     parser.add_argument("--max_iterations", type=int, default=300)
     parser.add_argument("--device", type=str, default="mps")
     parser.add_argument("--show_viewer", type=bool, default=False)
