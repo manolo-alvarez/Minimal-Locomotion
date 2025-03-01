@@ -312,7 +312,13 @@ class ZbotEnv:
         return self.actor_obs_buf, {"observations": {"critic": self.critic_obs_buf}}
 
     def get_observation_labels(self):
-        return self.obs_labels
+        """Return human-readable labels for each observation dimension."""
+        # Use existing labels already defined in the class
+        return self.obs_labels.copy()
+
+    def get_action_labels(self):
+        """Return human-readable labels for each action dimension."""
+        return [f"joint_{i}_target" for i in range(self.num_actions)]
 
     def get_privileged_observations(self):
         return None
