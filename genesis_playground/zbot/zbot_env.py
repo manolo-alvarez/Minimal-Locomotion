@@ -89,9 +89,9 @@ class ZbotEnv:
             sim_options=gs.options.SimOptions(dt=self.dt, substeps=2), # substep=2 for 50hz
             viewer_options=gs.options.ViewerOptions(
                 max_FPS=int(0.5 / self.dt),
-                camera_pos=(2.0, 0.0, 2.5),
-                camera_lookat=(0.0, 0.0, 0.5),
-                camera_fov=80,
+                camera_pos=(2.0, 0.0, 2.5),  # Current position
+                camera_lookat=(0.0, 0.0, 0.5),  # Current look-at point
+                camera_fov=80,  # Current field of view
             ),
             vis_options=gs.options.VisOptions(n_rendered_envs=1),
             rigid_options=gs.options.RigidOptions(
@@ -473,3 +473,62 @@ class ZbotEnv:
         zero_mask = (cmd_norm <= 0.1)
         reward[zero_mask] = 0.0
         return reward
+    
+    def setup_viewer_camera(self, position=(1.0, -1.0, 1.0), lookat=(0.0, 0.0, 0.3), fov=60):
+        """Set up the viewer camera with better defaults for visualization."""
+        if not hasattr(self.scene, "viewer") or self.scene.viewer is None:
+            return False
+            
+        try:
+            viewer = self.scene.viewer
+            viewer.camera.position = position
+            viewer.camera.lookat = lookat
+            viewer.camera.fov = fov
+            return True
+        except Exception as e:
+            print(f"Warning: Could not configure camera: {e}")
+            return False
+    
+    def add_camera_controls(self, camera_presets=None):
+        """Add camera preset controls to the viewer."""
+        if not hasattr(self.scene, "viewer") or self.scene.viewer is None:
+            return False
+            
+        viewer = self.scene.viewer
+        
+        if camera_presets is None:
+            # Default camera presets
+            camera_presets = {
+                "1": {"position": (1.0, -1.0, 1.0), "lookat": (0.0, 0.0, 0.3), "name": "Side view"},
+                "2": {"position": (0.0, -2.0, 1.0), "lookat": (0.0, 0.0, 0.3), "name": "Back view"},
+                "3": {"position": (2.0, 0.0, 0.8), "lookat": (0.0, 0.0, 0.3), "name": "Side view 2"},
+                "4": {"position": (0.5, 0.5, 1.5), "lookat": (0.0, 0.0, 0.3), "name": "Diagonal view"},
+                "5": {"position": (0.0, 0.0, 2.5), "lookat": (0.0, 0.0, 0.0), "name": "Top-down view"},
+            }
+        
+        try:
+            # Add key bindings for camera presets
+            for key, preset in camera_presets.items():
+                camera_pos = preset["position"]
+                camera_lookat = preset["lookat"]
+                name = preset["name"]
+                
+                def create_camera_setter(pos, lookat):
+                    return lambda: self._set_camera(pos, lookat)
+                
+                viewer.add_key_binding(
+                    key=key,
+                    callback=create_camera_setter(camera_pos, camera_lookat),
+                    description=f"Camera: {name}"
+                )
+            
+            return True
+        except Exception as e:
+            print(f"Warning: Could not add camera controls: {e}")
+            return False
+    
+    def _set_camera(self, position, lookat):
+        """Helper method to set camera position and lookat point."""
+        if hasattr(self.scene, "viewer") and self.scene.viewer is not None:
+            self.scene.viewer.camera.position = position
+            self.scene.viewer.camera.lookat = lookat

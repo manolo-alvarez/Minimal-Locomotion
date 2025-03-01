@@ -15,9 +15,15 @@ import genesis as gs
 USER_CMD = {"x": 0.0, "y": 0.0, "yaw": 0.0}
 INCREMENT = 0.6
 
+# Global flag to track if pygame is initialized
+PYGAME_INITIALIZED = False
+
 def init_pygame_window():
     """Initialize a small pygame window so that we can capture keyboard events."""
-    pygame.init()
+    global PYGAME_INITIALIZED
+    if not PYGAME_INITIALIZED:
+        pygame.init()
+        PYGAME_INITIALIZED = True
     screen = pygame.display.set_mode((400, 300))
     pygame.display.set_caption("Keyboard Control")
     return screen
@@ -60,6 +66,18 @@ def handle_pygame_events():
                 USER_CMD["yaw"] -= INCREMENT
             elif event.key == pygame.K_e:
                 USER_CMD["yaw"] += INCREMENT
+
+def update_pygame_display():
+    """Update the pygame display with current commands."""
+    if PYGAME_INITIALIZED:
+        screen = pygame.display.get_surface()
+        if screen:
+            screen.fill((0, 0, 0))
+            font = pygame.font.Font(None, 24)
+            text = font.render(f"CMD: x={USER_CMD['x']:.2f}, y={USER_CMD['y']:.2f}, yaw={USER_CMD['yaw']:.2f}", 
+                             True, (255, 255, 255))
+            screen.blit(text, (10, 10))
+            pygame.display.flip()
 
 def keyboard_control_policy(obs: torch.Tensor) -> torch.Tensor:
     """
@@ -120,9 +138,7 @@ def run_sim(env, policy_fn, obs, use_keyboard=False, base_policy=None, screen=No
     try:
         while timesteps < max_timesteps:
             if use_keyboard:
-                # Don't handle pygame events here - they're handled in the main thread
-                # Just use the USER_CMD global variable that's updated from the main thread
-                # Apply keyboard commands to observation
+                # Use the USER_CMD global variable that's updated from the main thread
                 x_cmd = USER_CMD["x"]
                 y_cmd = USER_CMD["y"]
                 yaw_cmd = USER_CMD["yaw"]
@@ -163,6 +179,9 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
         num_samples: Number of samples to collect
         device: Device to run on
     """
+    # Import the policy analyzer
+    from policy_analyzer import PolicyAnalyzer
+    
     # Get policy from runner
     policy = runner.get_inference_policy(device=device)
     
@@ -215,6 +234,122 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
     
     return analyzer
 
+def set_camera_view(viewer, position=(1.0, -1.0, 1.0), lookat=(0.0, 0.0, 0.3), fov=60):
+    """Set custom camera position for better robot visibility."""
+    if viewer is None:
+        print("Warning: No viewer available.")
+        return False
+        
+    try:
+        # Set camera parameters directly on the viewer
+        viewer.camera.position = position
+        viewer.camera.lookat = lookat
+        viewer.camera.fov = fov
+        return True
+    except AttributeError as e:
+        print(f"Warning: Unable to adjust camera settings: {e}")
+        return False
+
+def add_camera_keybindings(viewer):
+    """Add camera keyboard controls to the viewer."""
+    if viewer is None:
+        return
+    
+    try:
+        # Define camera positions/views
+        camera_presets = {
+            "1": {"position": (1.0, -1.0, 1.0), "lookat": (0.0, 0.0, 0.3), "name": "Side view"},
+            "2": {"position": (0.0, -2.0, 1.0), "lookat": (0.0, 0.0, 0.3), "name": "Back view"},
+            "3": {"position": (2.0, 0.0, 0.8), "lookat": (0.0, 0.0, 0.3), "name": "Side view 2"},
+            "4": {"position": (0.5, 0.5, 1.5), "lookat": (0.0, 0.0, 0.3), "name": "Diagonal view"},
+            "5": {"position": (0.0, 0.0, 2.5), "lookat": (0.0, 0.0, 0.0), "name": "Top-down view"},
+        }
+        
+        # Add key bindings for camera presets
+        for key, preset in camera_presets.items():
+            camera_pos = preset["position"]
+            camera_lookat = preset["lookat"]
+            name = preset["name"]
+            
+            viewer.add_key_binding(
+                key=key,
+                callback=lambda pos=camera_pos, lookat=camera_lookat: set_viewer_camera(viewer, pos, lookat),
+                description=f"Camera: {name}"
+            )
+        
+        # Add key binding for help text
+        viewer.add_key_binding(
+            key="h",
+            callback=lambda: toggle_help_text(viewer),
+            description="Toggle help text"
+        )
+            
+        return True
+    except Exception as e:
+        print(f"Warning: Could not add camera keybindings: {e}")
+        return False
+
+def set_viewer_camera(viewer, position, lookat):
+    """Set the camera position and lookat point for the viewer."""
+    if viewer is None:
+        return
+    
+    try:
+        viewer.camera.position = position
+        viewer.camera.lookat = lookat
+    except AttributeError as e:
+        print(f"Warning: Could not set viewer camera: {e}")
+
+# Global variable to track help text visibility
+SHOW_HELP_TEXT = True
+
+def toggle_help_text(viewer):
+    """Toggle the visibility of help text."""
+    global SHOW_HELP_TEXT
+    SHOW_HELP_TEXT = not SHOW_HELP_TEXT
+
+def camera_controls_callback(viewer):
+    """Display camera controls and other helpful information."""
+    global SHOW_HELP_TEXT
+    
+    if not SHOW_HELP_TEXT:
+        # Only show minimal help if help text is toggled off
+        viewer.add_text(
+            "Press 'H' for help", 
+            x=10, y=10, font_size=14, color=(1.0, 1.0, 1.0, 0.8)
+        )
+        return
+    
+    # Calculate current FPS
+    fps = viewer.fps_counter.get_fps() if hasattr(viewer, "fps_counter") else 0
+    
+    # Display all help text
+    lines = [
+        "Camera Controls:",
+        "- Middle Mouse: Rotate camera",
+        "- Right Mouse: Pan camera",
+        "- Scroll Wheel: Zoom in/out",
+        "",
+        "Camera Presets:",
+        "- 1: Side view",
+        "- 2: Back view",
+        "- 3: Side view 2",
+        "- 4: Diagonal view",
+        "- 5: Top-down view",
+        "",
+        "Other Controls:",
+        "- H: Toggle this help text",
+        f"FPS: {fps:.1f}"
+    ]
+    
+    y_pos = 10
+    for line in lines:
+        viewer.add_text(
+            line, 
+            x=10, y=y_pos, font_size=14, color=(1.0, 1.0, 1.0, 0.8)
+        )
+        y_pos += 20
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="zbot-walking")
@@ -234,18 +369,22 @@ def main():
     env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(open(f"logs/{args.exp_name}/cfgs.pkl", "rb"))
     reward_cfg["reward_scales"] = {}
 
+    # Create environment with show_viewer=True directly
     env = ZbotEnv(
         num_envs=1,
         env_cfg=env_cfg,
         obs_cfg=obs_cfg,
         reward_cfg=reward_cfg,
         command_cfg=command_cfg,
-        show_viewer=args.show_viewer,
+        show_viewer=args.show_viewer,  # Set viewer directly
     )
-
+    
     runner = OnPolicyRunner(env, train_cfg, log_dir, device=args.device)
     resume_path = os.path.join(log_dir, f"model_{args.ckpt}.pt")
     runner.load(resume_path)
+    
+    # Make policy accessible globally for keyboard_control_policy
+    global policy
     policy = runner.get_inference_policy(device=args.device)
     
     # Reset environment and get initial observation
@@ -253,9 +392,6 @@ def main():
     
     # If analyze flag is set, perform feature importance analysis
     if args.analyze:
-        # Import the policy analyzer
-        from policy_analyzer import PolicyAnalyzer, analyze_policy
-        
         # Run analysis
         analysis_dir = f"logs/{args.exp_name}/feature_analysis"
         analyzer = analyze_policy(
@@ -268,62 +404,36 @@ def main():
         print(f"Feature analysis complete. Results saved to {analysis_dir}/")
         
         # Continue with normal evaluation or exit
-        if not args.use_keyboard:
+        if not args.use_keyboard and not args.show_viewer:
             print("Analysis complete. Exiting.")
             return
 
-    # Run simulation with selected policy using the Genesis viewer
+    # Setup viewer when needed
+    if args.show_viewer and hasattr(env.scene, "viewer") and env.scene.viewer is not None:
+        # Set the camera controls callback
+        env.scene.viewer.custom_render_callback = camera_controls_callback
+
+    # Run simulation with selected policy
     if args.show_viewer:
-        # Initialize pygame in the main thread if using keyboard control
-        screen = None
-        if args.use_keyboard:
-            screen = init_pygame_window()
-        
         # Run simulation in a separate thread
         with torch.no_grad():
-            if args.use_keyboard:
-                # Pass in keyboard control arguments but DON'T initialize pygame in the thread
-                gs.tools.run_in_another_thread(
-                    run_sim, 
-                    args=(env, policy, obs, True, policy, None)
-                )
-            else:
-                gs.tools.run_in_another_thread(
-                    run_sim, 
-                    args=(env, policy, obs)
-                )
+            gs.tools.run_in_another_thread(
+                run_sim, 
+                args=(env, policy, obs)
+            )
             
-            # Start the viewer in the main thread
+            # Start the viewer in the main thread if available
             if hasattr(env.scene, "viewer") and env.scene.viewer is not None:
-                # If using keyboard control, we need to handle pygame events in the main thread
-                if args.use_keyboard and screen is not None:
-                    def custom_render_callback():
-                        # Handle pygame events
-                        handle_pygame_events()
-                        
-                        # Update pygame display
-                        screen.fill((0, 0, 0))
-                        font = pygame.font.Font(None, 24)
-                        text = font.render(f"CMD: x={USER_CMD['x']:.2f}, y={USER_CMD['y']:.2f}, yaw={USER_CMD['yaw']:.2f}", 
-                                         True, (255, 255, 255))
-                        screen.blit(text, (10, 10))
-                        pygame.display.flip()
-                    
-                    # Set custom rendering callback to handle pygame events
-                    env.scene.viewer.custom_render_callback = custom_render_callback
+                print("Starting viewer with enhanced camera controls.")
+                print("Press 'H' to toggle help text.")
                 
                 # Start the viewer
                 env.scene.viewer.start()
             else:
-                print("Warning: Scene viewer not available. Make sure show_viewer=True in environment creation.")
+                print("Warning: Scene viewer not available.")
     else:
-        # Run without the viewer (useful for headless systems or pure analysis)
-        if args.use_keyboard:
-            # For non-viewer mode, initialize pygame in the main thread
-            screen = init_pygame_window()
-            run_sim(env, policy, obs, use_keyboard=True, base_policy=policy, screen=screen)
-        else:
-            run_sim(env, policy, obs)
+        # Run without the viewer
+        run_sim(env, policy, obs)
         
 if __name__ == "__main__":
     main()
