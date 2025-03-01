@@ -69,6 +69,21 @@ class ZbotEnv:
         for dof_name in self.env_cfg["dof_names"]:
             self.obs_labels.append(f"dof_{dof_name}_action")
 
+        self.obs_exclusions = obs_cfg["obs_exclusions"]
+        for exclusion in self.obs_exclusions:
+            if exclusion not in self.obs_labels:
+                raise ValueError("Observation exclusion \"" + exclusion + "\" not found in obs_labels")
+        self.num_actor_obs = self.num_obs - len(self.obs_exclusions)
+        
+        # Create a boolean mask for all observation dimensions
+        actor_obs_mask = torch.ones(self.num_obs, dtype=torch.bool, device=self.device)
+        # Set excluded dimensions to False in the mask
+        for idx, label in enumerate(self.obs_labels):
+            if label in self.obs_exclusions:
+                actor_obs_mask[idx] = False
+
+        # Create a mapping of indices to keep for the actor observations
+        self.actor_obs_mapping = torch.where(actor_obs_mask)[0]
         # create scene
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=self.dt, substeps=2), # substep=2 for 50hz
@@ -139,7 +154,13 @@ class ZbotEnv:
         self.global_gravity = torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=gs.tc_float).repeat(
             self.num_envs, 1
         )
-        self.obs_buf = torch.zeros((self.num_envs, self.num_obs), device=self.device, dtype=gs.tc_float)
+        
+        # We need to create empty buffers in init, becasue the OnPolicyRunner calls get_observations
+        # before training to get the observation space dimensions.
+        self.full_obs_buf = torch.zeros((self.num_envs, self.num_obs), device=self.device, dtype=gs.tc_float)
+        self.actor_obs_buf = torch.zeros((self.num_envs, self.num_actor_obs), device=self.device, dtype=gs.tc_float)
+        self.critic_obs_buf = self.full_obs_buf
+
         self.rew_buf = torch.zeros((self.num_envs,), device=self.device, dtype=gs.tc_float)
         self.reset_buf = torch.ones((self.num_envs,), device=self.device, dtype=gs.tc_int)
         self.episode_length_buf = torch.zeros((self.num_envs,), device=self.device, dtype=gs.tc_int)
@@ -248,18 +269,7 @@ class ZbotEnv:
             self.rew_buf += rew
             self.episode_sums[name] += rew
 
-        # compute observations
-        self.obs_buf = torch.cat(
-            [
-                self.base_ang_vel * self.obs_scales["ang_vel"],  # 3
-                self.projected_gravity,  # 3
-                self.commands * self.commands_scale,  # 3
-                (self.dof_pos - self.default_dof_pos) * self.obs_scales["dof_pos"],  # 12
-                self.dof_vel * self.obs_scales["dof_vel"],  # 12
-                self.actions,  # 12
-            ],
-            axis=-1,
-        )
+        self.populate_observation_buffers()
 
         self.last_actions[:] = self.actions[:]
         self.last_dof_vel[:] = self.dof_vel[:]
@@ -267,9 +277,30 @@ class ZbotEnv:
         
         # during training rsl_rl expects the critic observations to be 
         # returned in this format
-        self.extras["observations"] = {"critic": self.obs_buf}
+        self.extras["observations"] = {"critic": self.critic_obs_buf}
 
-        return self.obs_buf, self.rew_buf, self.reset_buf, self.extras
+        return self.actor_obs_buf, self.rew_buf, self.reset_buf, self.extras
+    
+    def populate_observation_buffers(self):
+        # Create the full observation buffer, same as before
+        self.full_obs_buf = torch.cat(
+            [
+                self.base_ang_vel * self.obs_scales["ang_vel"],  # 3
+                self.projected_gravity,  # 3
+                self.commands * self.commands_scale,  # 3
+                (self.dof_pos - self.default_dof_pos) * self.obs_scales["dof_pos"],  # 10
+                self.dof_vel * self.obs_scales["dof_vel"],  # 10
+                self.actions,  # 10
+            ],
+            axis=-1,
+        )
+        
+        # Critic observation buffer is always equal to full observation buffer
+        self.critic_obs_buf = self.full_obs_buf
+        
+        # Fill the actor observation buffer by selecting only non-excluded dimensions
+        # We use the actor_obs_mapping which contains indices of observations to keep
+        self.actor_obs_buf = self.full_obs_buf[:, self.actor_obs_mapping]
 
     def get_observations(self):
         # The latest rsl_rl expects seperate observation vectors for our policy and 
@@ -278,7 +309,7 @@ class ZbotEnv:
         # This means that when we try to train a minimal policy, we can exclude certain
         # observations from our policy, but still give them to the critic defining our 
         # value function target. This will be interesting to leverage
-        return self.obs_buf, {"observations": {"critic": self.obs_buf}}
+        return self.actor_obs_buf, {"observations": {"critic": self.critic_obs_buf}}
 
     def get_observation_labels(self):
         return self.obs_labels
@@ -372,7 +403,7 @@ class ZbotEnv:
             chunk_end = min(i + chunk_size, self.num_envs)
             chunk_indices = torch.arange(i, chunk_end, device=self.device)
             self.reset_idx(chunk_indices)
-        return self.obs_buf, None
+        return self.actor_obs_buf, {"observations": {"critic": self.critic_obs_buf}}
 
     # ------------ reward functions----------------
 

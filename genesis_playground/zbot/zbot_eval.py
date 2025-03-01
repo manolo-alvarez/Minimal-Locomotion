@@ -145,6 +145,11 @@ def main():
         open(f"{log_dir}/cfgs.pkl", "rb")
     )
 
+    # To maintain backward compatibility with older checkpoints, we add an empty list
+    # to the obs_cfg if it doesn't exist.
+    if "obs_exclusions" not in obs_cfg:
+        obs_cfg["obs_exclusions"] = []
+
     env = ZbotEnv(
         num_envs=args.num_envs,
         env_cfg=env_cfg,

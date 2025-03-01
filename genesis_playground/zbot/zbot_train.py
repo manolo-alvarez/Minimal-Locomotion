@@ -146,6 +146,8 @@ def get_cfgs():
             "dof_pos": 1.0,
             "dof_vel": 0.05,
         },
+        # Include names of observations to exclude from the actor observations
+        "obs_exclusions": []
     }
     reward_cfg = {
         "tracking_sigma": 0.25,
