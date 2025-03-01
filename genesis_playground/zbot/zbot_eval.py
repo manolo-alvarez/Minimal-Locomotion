@@ -368,7 +368,7 @@ def camera_controls_callback(viewer):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="zbot-walking")
-    parser.add_argument("--ckpt", type=int, default=300)
+    parser.add_argument("--ckpt", type=int, default=299)
     parser.add_argument("--device", type=str, default="mps")
     parser.add_argument("--use_keyboard", action="store_true", help="Use keyboard for control")
     parser.add_argument("--analyze", action="store_true", help="Perform feature importance analysis")

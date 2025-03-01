@@ -93,14 +93,7 @@ class PolicyAnalyzer:
         perturbation_scale: float = 0.01,
         num_samples: int = 10
     ):
-        """
-        Compute sensitivity of policy outputs to input perturbations.
-        
-        Args:
-            base_observation: Base observation to perturb [batch_size, obs_dim]
-            perturbation_scale: Scale of perturbations relative to feature std
-            num_samples: Number of samples for each feature perturbation
-        """
+        """Compute sensitivity of policy outputs to input perturbations."""
         # Make sure base_observation is 2D [batch_size, obs_dim]
         if base_observation.dim() == 1:
             base_observation = base_observation.unsqueeze(0)
@@ -121,10 +114,11 @@ class PolicyAnalyzer:
         else:
             # Scale perturbation by feature std to account for different scales
             perturbation_sizes = self.obs_stats['std'] * perturbation_scale
-        
-        # Get baseline action
-        with torch.no_grad():
-            base_action = self.policy(base_observation).squeeze(0)
+            
+        # Ensure minimum perturbation size to avoid numerical issues
+        min_perturbation = 1e-6
+        perturbation_sizes = torch.maximum(perturbation_sizes, 
+                                          torch.tensor(min_perturbation, device=self.device))
         
         # Initialize sensitivity matrices
         self.sensitivity_matrix = torch.zeros((obs_dim, action_dim), device=self.device)
@@ -138,33 +132,90 @@ class PolicyAnalyzer:
                                                 perturbation_sizes[i], 
                                                 num_samples)
             
-            # Create perturbed observations by adding to the base observation
-            # Make sure to properly broadcast
+            # Create perturbed observations
             perturbed_obs = base_observation.repeat(num_samples, 1) + perturbations
             
             # Get actions for perturbed observations
             with torch.no_grad():
                 perturbed_actions = self.policy(perturbed_obs)
             
-            # Compute sensitivity as average gradient of action w.r.t. observation
-            # Using central difference approximation
-            feature_sensitivity = (perturbed_actions[-1] - perturbed_actions[0]) / (2 * perturbation_sizes[i])
-            
-            # Store the sensitivity (ensure it's the right shape for assignment)
-            self.sensitivity_matrix[i, :] = feature_sensitivity
-            
-            # Normalize sensitivity by typical range of action values
-            if self.action_stats['std'] is not None:
-                action_ranges = self.action_stats['max'] - self.action_stats['min']
-                # Avoid division by zero
-                action_ranges = torch.where(action_ranges > 1e-6, action_ranges, torch.ones_like(action_ranges))
+            # Use a more robust calculation method for sensitivity
+            if num_samples >= 3:
+                # Use multiple samples for more stability
+                pos_actions = perturbed_actions[num_samples//2+1:]  # Positive perturbations
+                neg_actions = perturbed_actions[:num_samples//2]    # Negative perturbations
                 
-                # Scale sensitivity by obs_std / action_range
-                self.normalized_sensitivity_matrix[i, :] = (
-                    self.sensitivity_matrix[i, :] * self.obs_stats['std'][i] / action_ranges
-                )
+                pos_values = perturbed_obs[num_samples//2+1:, i]
+                neg_values = perturbed_obs[:num_samples//2, i]
+                
+                # Average sensitivity across all pairs of points
+                sensitivity_sum = torch.zeros(action_dim, device=self.device)
+                count = 0
+                
+                for p_idx, p_action in enumerate(pos_actions):
+                    for n_idx, n_action in enumerate(neg_actions):
+                        obs_diff = pos_values[p_idx] - neg_values[n_idx]
+                        
+                        # Avoid division by very small values
+                        if abs(obs_diff.item()) > 1e-10:
+                            action_diff = p_action - n_action
+                            sensitivity_sum += action_diff / obs_diff
+                            count += 1
+                
+                # Compute average, with fallback if count is zero
+                if count > 0:
+                    feature_sensitivity = sensitivity_sum / count
+                else:
+                    feature_sensitivity = torch.zeros(action_dim, device=self.device)
             else:
-                self.normalized_sensitivity_matrix[i, :] = self.sensitivity_matrix[i, :]
+                # Simple two-point calculation
+                action_diff = perturbed_actions[-1] - perturbed_actions[0]
+                feature_diff = perturbed_obs[-1, i] - perturbed_obs[0, i]
+                
+                # Avoid division by very small values
+                if abs(feature_diff.item()) > 1e-10:
+                    feature_sensitivity = action_diff / feature_diff
+                else:
+                    feature_sensitivity = torch.zeros(action_dim, device=self.device)
+            
+            # Replace any NaN values
+            if torch.isnan(feature_sensitivity).any():
+                print(f"Warning: NaN detected in sensitivity for feature {i} ({self.obs_labels[i]}). Setting to zero.")
+                feature_sensitivity = torch.where(torch.isnan(feature_sensitivity), 
+                                                torch.zeros_like(feature_sensitivity), 
+                                                feature_sensitivity)
+            
+            # Store the sensitivity
+            self.sensitivity_matrix[i, :] = feature_sensitivity
+        
+        # Normalize sensitivity by feature ranges
+        if self.obs_stats['std'] is not None:
+            for i in range(obs_dim):
+                # Get feature range (using statistics)
+                feature_std = self.obs_stats['std'][i].clamp(min=1e-6)
+                
+                # Get action ranges
+                action_ranges = (self.action_stats['max'] - self.action_stats['min']).clamp(min=1e-6)
+                
+                # Normalize: sensitivity * feature_std / action_range
+                normalized_sensitivity = self.sensitivity_matrix[i, :] * feature_std / action_ranges
+                
+                # Replace NaN values if any
+                if torch.isnan(normalized_sensitivity).any():
+                    print(f"Warning: NaN in normalized sensitivity for feature {i} ({self.obs_labels[i]}). Setting to zero.")
+                    normalized_sensitivity = torch.where(torch.isnan(normalized_sensitivity),
+                                                      torch.zeros_like(normalized_sensitivity),
+                                                      normalized_sensitivity)
+                
+                self.normalized_sensitivity_matrix[i, :] = normalized_sensitivity
+        else:
+            # If no statistics available, just use raw sensitivity
+            self.normalized_sensitivity_matrix = self.sensitivity_matrix.clone()
+        
+        # Final check for any remaining NaNs
+        if torch.isnan(self.normalized_sensitivity_matrix).any():
+            print("Warning: NaN values still present in sensitivity matrix. Replacing with zeros.")
+            self.normalized_sensitivity_matrix = torch.nan_to_num(self.normalized_sensitivity_matrix, nan=0.0)
                 
     def plot_feature_statistics(self):
         """Plot statistics for each feature."""
@@ -298,16 +349,21 @@ class PolicyAnalyzer:
         
         # Calculate overall feature importance
         feature_importance = np.linalg.norm(abs_sensitivity, axis=1)
-        top_k_features = min(top_k_features, len(feature_importance))  # Ensure we don't exceed number of features
+        total_features = len(feature_importance)  # Store total number of features
+        top_k_features = min(top_k_features, total_features)  # Ensure we don't exceed number of features
         feature_indices = np.argsort(feature_importance)[::-1][:top_k_features]
         
         # Calculate overall action sensitivity
         action_sensitivity = np.linalg.norm(abs_sensitivity, axis=0)
+        total_actions = len(action_sensitivity)  # Store total number of actions
+        
         if top_k_actions is not None:
-            top_k_actions = min(top_k_actions, len(action_sensitivity))  # Ensure we don't exceed number of actions
+            top_k_actions = min(top_k_actions, total_actions)  # Ensure we don't exceed number of actions
             action_indices = np.argsort(action_sensitivity)[::-1][:top_k_actions]
+            action_count_text = f"Top {top_k_actions} of {total_actions} Actions"
         else:
-            action_indices = np.arange(len(self.action_labels))
+            action_indices = np.arange(total_actions)
+            action_count_text = f"All {total_actions} Actions"
             
         # Extract subset of sensitivity matrix
         subset_sensitivity = abs_sensitivity[np.ix_(feature_indices, action_indices)]
@@ -365,10 +421,13 @@ class PolicyAnalyzer:
                       [self.action_labels[i] for i in action_indices], 
                       rotation=45, ha='right')
         
-        plt.title('Feature-Action Sensitivity Heatmap', fontsize=16, fontweight='bold')
+        # Updated title to clearly indicate feature count
+        plt.title(f'Feature-Action Sensitivity Heatmap\nTop {top_k_features} of {total_features} Features vs {action_count_text}', 
+                  fontsize=16, fontweight='bold')
+              
         plt.tight_layout()
         
-        plt.savefig(f"{self.save_dir}/feature_action_heatmap.png", dpi=300, bbox_inches='tight')
+        plt.savefig(f"{self.save_dir}/feature_action_heatmap_top{top_k_features}.png", dpi=300, bbox_inches='tight')
         plt.close()
     
     def plot_feature_distributions(self, observations: torch.Tensor, max_features_per_plot: int = 12):
@@ -451,20 +510,10 @@ class PolicyAnalyzer:
             plt.close()
     
     def plot_all_features_importance(self, normalized: bool = True):
-        """
-        Plot all features by their importance.
-        
-        Args:
-            normalized: Whether to use normalized sensitivity
-        """
+        """Plot all features by their importance."""
         if self.sensitivity_matrix is None:
             print("No sensitivity computed. Run compute_sensitivity first.")
             return
-        
-        # Set a more professional style if seaborn is available
-        if HAS_SEABORN:
-            sns.set_style("whitegrid")
-            sns.set_context("paper", font_scale=1.2)
         
         # Choose sensitivity matrix
         sensitivity = self.normalized_sensitivity_matrix if normalized else self.sensitivity_matrix
@@ -472,11 +521,34 @@ class PolicyAnalyzer:
         # Calculate overall feature importance as L2 norm across actions
         feature_importance = torch.norm(sensitivity, dim=1).cpu().numpy()
         
-        # Sort features by importance
-        sorted_indices = np.argsort(feature_importance)[::-1]
+        # Check for NaN values and replace with zeros
+        if np.isnan(feature_importance).any():
+            print("Warning: NaN values detected in feature importance. Replacing with zeros.")
+            feature_importance = np.where(np.isnan(feature_importance), 0.0, feature_importance)
+        
+        # Sort features by importance (highest to lowest)
+        sorted_indices = np.argsort(-feature_importance)  # Use negative for descending order
         num_features = len(sorted_indices)
         
-        # Get feature labels and importance values
+        # Debug print to verify sorting
+        print("\nTop 5 features by importance:")
+        print("-" * 60)
+        print(f"{'Rank':<5}{'Feature ID':<10}{'Importance':<12}Feature Name")
+        print("-" * 60)
+        for i in range(min(5, num_features)):
+            idx = sorted_indices[i]
+            print(f"{i+1:<5}{idx:<10}{feature_importance[idx]:.6f}      {self.obs_labels[idx]}")
+        
+        print("\nBottom 5 features by importance:")
+        print("-" * 60)
+        print(f"{'Rank':<5}{'Feature ID':<10}{'Importance':<12}Feature Name")
+        print("-" * 60)
+        for i in range(min(5, num_features)):
+            idx = sorted_indices[-(i+1)]
+            print(f"{num_features-i:<5}{idx:<10}{feature_importance[idx]:.6f}      {self.obs_labels[idx]}")
+        print("-" * 60)
+        
+        # Get feature labels and importance values in sorted order
         labels = [f"{self.obs_labels[i]} (#{i})" for i in sorted_indices]
         values = feature_importance[sorted_indices]
         
@@ -490,24 +562,25 @@ class PolicyAnalyzer:
         
         # Add value labels at the end of each bar
         for i, (bar, value) in enumerate(zip(bars, values)):
-            plt.text(value + 0.01, bar.get_y() + bar.get_height()/2, 
-                    f'{value:.3f}', va='center', fontsize=8)
+            # Only show value if it's significant (avoid cluttering with near-zero values)
+            if value > max(values) * 0.001:
+                plt.text(value + max(values) * 0.01, bar.get_y() + bar.get_height()/2, 
+                        f'{value:.5f}', va='center', fontsize=8)
         
         # Improve aesthetics
         plt.yticks(np.arange(num_features), labels, fontsize=9)
         plt.xlabel('Sensitivity (L2 norm across actions)', fontweight='bold')
-        title = 'All Features by Importance'
-        if normalized:
-            title += ' (Normalized by Feature Range)'
-        plt.title(title, fontsize=14, fontweight='bold')
+        
+        # Updated title to be more descriptive
+        plt.title('Complete Feature Importance Ranking', fontsize=14, fontweight='bold')
         
         # Add grid only on x-axis
         plt.grid(axis='x', alpha=0.3)
         
         plt.tight_layout()
         
-        plt.savefig(f"{self.save_dir}/all_features_{'normalized' if normalized else 'raw'}.png", 
-                   dpi=300, bbox_inches='tight')
+        # Use a more descriptive filename
+        plt.savefig(f"{self.save_dir}/feature_importance_ranking.png", dpi=300, bbox_inches='tight')
         plt.close()
     
     def run_full_analysis(
@@ -545,15 +618,19 @@ class PolicyAnalyzer:
         num_actions = self.normalized_sensitivity_matrix.shape[1]
         print(f"Analysis complete for {num_features} features and {num_actions} actions.")
         
-        # Generate plots
+        # Generate plots - SIMPLIFIED
         print("Generating plots...")
         self.plot_feature_statistics()
         self.plot_feature_distributions(observations, max_features_per_plot=12)  # Multiple plots if needed
-        self.plot_top_features_by_sensitivity(top_k=min(top_k, num_features), normalized=True)
-        self.plot_all_features_importance(normalized=True)  # Plot all features
-        self.plot_feature_action_heatmap(top_k_features=min(top_k, num_features))
+        
+        # Only create the comprehensive plot of all features
+        self.plot_all_features_importance(normalized=True)  
+        
+        # Remove the heatmap that was causing issues
+        # self.plot_feature_action_heatmap(top_k_features=min(top_k, num_features))
         
         self.print_top_features(top_k=min(top_k, num_features))
+        self.save_feature_importance_table(normalized=True)
         
         print(f"Analysis complete. Results saved to {self.save_dir}/")
         
@@ -606,6 +683,79 @@ class PolicyAnalyzer:
                 f.write(f"{i+1:<5}{idx:<10}{importance:.4f}      {name}\n")
             
             f.write("-" * 60 + "\n")
+
+    def save_feature_importance_table(self, normalized=True):
+        """Save a detailed table of feature importance with descriptions."""
+        if self.normalized_sensitivity_matrix is None:
+            print("No sensitivity computed. Run compute_sensitivity first.")
+            return
+        
+        # Choose sensitivity matrix
+        sensitivity = self.normalized_sensitivity_matrix if normalized else self.sensitivity_matrix
+        
+        # Calculate overall feature importance
+        feature_importance = torch.norm(sensitivity, dim=1).cpu().numpy()
+        
+        # Check for NaN values
+        if np.isnan(feature_importance).any():
+            print("Warning: NaN values detected in feature importance. Replacing with zeros.")
+            feature_importance = np.where(np.isnan(feature_importance), 0.0, feature_importance)
+        
+        # Sort features by importance
+        sorted_indices = np.argsort(-feature_importance)
+        
+        # Prepare table
+        table = []
+        table.append("# Feature Importance Analysis")
+        table.append("\n## Feature Descriptions")
+        table.append("- Base height: Height of the robot's base from the ground")
+        table.append("- Base orientation: Roll, pitch, yaw angles of the robot's base")
+        table.append("- Base linear velocity: Forward (x), lateral (y), and vertical (z) velocity")
+        table.append("- Commands: Target velocities for the robot to achieve")
+        table.append("- Joint positions: Current angles of each robot joint")
+        table.append("- Joint velocities: Current angular velocities of each joint")
+        table.append("\n## Importance Ranking (Normalized)")
+        table.append("\n| Rank | Feature ID | Importance | Feature Name | Description |")
+        table.append("| ---- | ---------- | ---------- | ------------ | ----------- |")
+        
+        # Feature descriptions dictionary
+        descriptions = {
+            "base_height": "Height of robot base from ground",
+            "projected_gravity": "Gravity vector in robot's frame (indicates orientation)",
+            "base_ang_vel": "Angular velocity of the robot's base",
+            "base_lin_vel": "Linear velocity of the robot's base",
+            "command": "Target velocity command for the robot to achieve",
+            "dof_pos": "Current position/angle of a robot joint",
+            "dof_vel": "Current angular velocity of a robot joint",
+        }
+        
+        # Add rows to table
+        for rank, idx in enumerate(sorted_indices):
+            name = self.obs_labels[idx]
+            importance = feature_importance[idx]
+            
+            # Get description
+            description = "Unknown"
+            for key, desc in descriptions.items():
+                if key in name:
+                    description = desc
+                    break
+            
+            table.append(f"| {rank+1} | {idx} | {importance:.6f} | {name} | {description} |")
+        
+        # Write table to file
+        with open(f"{self.save_dir}/feature_importance_table.md", 'w') as f:
+            f.write("\n".join(table))
+        
+        print(f"Feature importance table saved to {self.save_dir}/feature_importance_table.md")
+
+        # Also save CSV version for easy import into other tools
+        with open(f"{self.save_dir}/feature_importance.csv", 'w') as f:
+            f.write("rank,feature_id,importance,feature_name\n")
+            for rank, idx in enumerate(sorted_indices):
+                name = self.obs_labels[idx]
+                importance = feature_importance[idx]
+                f.write(f"{rank+1},{idx},{importance:.6f},{name}\n")
 
 
 def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, device="cpu"):
