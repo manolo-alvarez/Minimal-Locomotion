@@ -31,6 +31,30 @@
                 "--analyze", 
                 "--show_viewer"
             ]
+        },
+        {
+            "name": "zbot_train (mps)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "genesis_playground/zbot/zbot_train.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-e", "zbot-walking", 
+                "--num_envs", "4096",
+                "--device", "mps"
+            ]
+        },
+        {
+            "name": "zbot_train (cuda)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "genesis_playground/zbot/zbot_train",
+            "console": "integratedTerminal",
+            "args": [
+                "-e", "zbot-walking", 
+                "--num_envs", "4096",
+                "--device", "cuda"
+            ]
         }
     ]
 }
