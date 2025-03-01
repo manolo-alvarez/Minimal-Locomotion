@@ -1,0 +1,5 @@
+kscale
+genesis-world
+rsl-rl @ git+https://github.com/leggedrobotics/rsl_rl.git@v1.0.2
+tensorboard
+pygame
