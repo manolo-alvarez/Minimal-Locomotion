@@ -48,6 +48,27 @@ class ZbotEnv:
         self.obs_scales = obs_cfg["obs_scales"]
         self.reward_scales = reward_cfg["reward_scales"]
 
+        self.obs_labels = [
+            "base_ang_vel_x",
+            "base_ang_vel_y",
+            "base_ang_vel_z",
+            "projected_gravity_x",
+            "projected_gravity_y",
+            "projected_gravity_z",
+            "command_lin_vel_x",
+            "command_lin_vel_y",
+            "command_ang_vel_z"
+        ]
+
+        for dof_name in self.env_cfg["dof_names"]:
+            self.obs_labels.append(f"dof_pos_{dof_name}")
+
+        for dof_name in self.env_cfg["dof_names"]:
+            self.obs_labels.append(f"dof_vel_{dof_name}")
+
+        for dof_name in self.env_cfg["dof_names"]:
+            self.obs_labels.append(f"dof_{dof_name}_action")
+
         # create scene
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=self.dt, substeps=2), # substep=2 for 50hz
@@ -258,6 +279,9 @@ class ZbotEnv:
         # observations from our policy, but still give them to the critic defining our 
         # value function target. This will be interesting to leverage
         return self.obs_buf, {"observations": {"critic": self.obs_buf}}
+
+    def get_observation_labels(self):
+        return self.obs_labels
 
     def get_privileged_observations(self):
         return None
