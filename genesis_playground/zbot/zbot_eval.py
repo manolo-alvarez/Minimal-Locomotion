@@ -627,7 +627,12 @@ def main():
                 phase_indices = detect_gait_phases(observations, env)
             
             # Run the analysis with the detected phases
-            analyzer.phase_aware_sensitivity_analysis(observations, env, phase_indices=phase_indices)
+            analyzer.phase_aware_sensitivity_analysis(
+                observations, 
+                env, 
+                phase_indices=phase_indices,
+                foot_contacts=foot_contacts  # Pass the foot contacts
+            )
             
             # Also run standard analysis for comparison
             analyzer.run_full_analysis(observations)

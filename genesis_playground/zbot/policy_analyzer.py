@@ -1007,7 +1007,7 @@ class PolicyAnalyzer:
         np.save(f"{self.save_dir}/sensitivity_aggregated.npy", 
                self.normalized_sensitivity_matrix.cpu().numpy())
 
-    def phase_aware_sensitivity_analysis(self, observations, env, num_phases=8, perturbation_scale=0.01, phase_indices=None):
+    def phase_aware_sensitivity_analysis(self, observations, env, num_phases=8, perturbation_scale=0.01, phase_indices=None, foot_contacts=None):
         """
         Analyze feature sensitivity across different phases of the gait cycle.
         
@@ -1017,6 +1017,7 @@ class PolicyAnalyzer:
             num_phases: Number of phases to divide the gait cycle into (if detecting phases)
             perturbation_scale: Scale of perturbations for sensitivity analysis
             phase_indices: Pre-computed phase indices (dictionary mapping phase number to observation indices)
+            foot_contacts: Tensor of foot contact information (if available)
         """
         # First collect overall statistics
         self.collect_statistics(observations)
@@ -1033,35 +1034,39 @@ class PolicyAnalyzer:
         # Initialize storage for phase-specific sensitivities
         phase_sensitivities = {}
         
+        # Get observation and action dimensions
+        obs_dim = observations.shape[1]
+        
+        # Do a forward pass to determine action dimension
+        with torch.no_grad():
+            test_action = self.policy(observations[:1])
+        action_dim = test_action.shape[1]
+        
         # Create a subplot grid for phase-specific importance plots
-        fig, axes = plt.subplots(2, 4, figsize=(20, 10), sharey=True) if num_phases == 8 else plt.subplots(
-            int(np.ceil(num_phases/4)), 4, figsize=(20, 5*np.ceil(num_phases/4)), sharey=True)
+        fig, axes = plt.subplots(2, 4, figsize=(20, 10)) if num_phases == 8 else plt.subplots(
+            int(np.ceil(num_phases/4)), 4, figsize=(20, 5*np.ceil(num_phases/4)))
         axes = axes.flatten()
         
-        # Analyze each phase separately
-        for phase in range(num_phases):
-            idx = phase_indices[phase]
-            if len(idx) < 5:  # Skip phases with too few samples
-                print(f"Warning: Phase {phase} has only {len(idx)} samples. Skipping.")
+        # For each phase, compute a separate sensitivity matrix
+        for phase in sorted(phase_indices.keys()):
+            phase_idx = phase_indices[phase]
+            
+            if len(phase_idx) < 5:
+                print(f"Warning: Phase {phase} has too few samples ({len(phase_idx)}). Skipping.")
                 continue
                 
-            print(f"Analyzing phase {phase}/{num_phases} with {len(idx)} samples")
+            print(f"Analyzing phase {phase}/{num_phases-1} with {len(phase_idx)} samples")
             
-            # Get representative observation for this phase
-            phase_obs = observations[idx]
-            base_obs = phase_obs.mean(dim=0, keepdim=True)
+            # Get mean observation for this phase
+            phase_observations = observations[phase_idx]
+            base_obs = phase_observations.mean(dim=0, keepdim=True)
             
-            # Get action dimension by doing a forward pass
-            with torch.no_grad():
-                test_action = self.policy(base_obs)
-            action_dim = test_action.shape[1]
+            # Create a new sensitivity matrix for this phase
+            phase_sensitivity = torch.zeros((obs_dim, action_dim), device=self.device)
             
-            # Initialize sensitivity matrices for this phase
-            obs_dim = observations.shape[1]
-            sensitivity = torch.zeros((obs_dim, action_dim), device=self.device)
-            
-            # Compute sensitivity using central difference method
+            # Compute sensitivity for this phase using central difference method
             for i in range(obs_dim):
+                # Set perturbation size based on feature statistics
                 delta = perturbation_scale * self.obs_stats['std'][i].clamp(min=1e-6)
                 
                 # Create perturbed observations
@@ -1078,41 +1083,132 @@ class PolicyAnalyzer:
                 
                 # Compute sensitivity
                 feature_sensitivity = (pos_action - neg_action) / (2 * delta)
-                sensitivity[i, :] = feature_sensitivity
-            
+                
+                # Store in phase-specific sensitivity matrix
+                phase_sensitivity[i] = feature_sensitivity
+                
             # Store this phase's sensitivity
-            phase_sensitivities[phase] = sensitivity
+            phase_sensitivities[phase] = phase_sensitivity
             
-            # Plot feature importance for this phase
-            feature_importance = torch.norm(sensitivity, dim=1).cpu().numpy()
+            # Calculate feature importance for this phase
+            feature_importance = torch.norm(phase_sensitivity, dim=1).cpu().numpy()
+            
+            # Sort features by importance for this specific phase
             sorted_indices = np.argsort(-feature_importance)[:20]  # Top 20 features
             
             # Plot in the appropriate subplot
             ax = axes[phase]
-            labels = [self.obs_labels[i] for i in sorted_indices]
+            labels = [f"{self.obs_labels[i]}" for i in sorted_indices]
             values = feature_importance[sorted_indices]
             
-            ax.barh(range(len(labels)), values, align='center', color='teal')
-            ax.set_yticks(range(len(labels)))
+            # Create horizontal bar chart
+            bars = ax.barh(range(len(sorted_indices)), values, align='center')
+            ax.set_yticks(range(len(sorted_indices)))
             ax.set_yticklabels(labels, fontsize=8)
-            ax.set_title(f"Phase {phase}", fontweight='bold')
+            
+            # Add phase name with description
+            phase_name = self.get_phase_name(phase, num_phases)
+            ax.set_title(f"Phase {phase}: {phase_name}", fontweight='bold')
+            
             if phase % 4 == 0:
                 ax.set_ylabel("Features")
             if phase >= num_phases-4:
                 ax.set_xlabel("Importance")
+                
+            # Add importance values as text
+            for i, v in enumerate(values):
+                ax.text(v + 0.01, i, f"{v:.3f}", va='center', fontsize=7)
         
-        # Hide any unused subplots
-        for i in range(num_phases, len(axes)):
-            axes[i].set_visible(False)
-            
-        plt.tight_layout()
+        # Add overall title
+        plt.suptitle("Feature Importance by Gait Phase", fontsize=16, fontweight='bold', y=0.98)
+        
+        # Adjust layout
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
         plt.savefig(f"{self.save_dir}/phase_feature_importance.png", dpi=300, bbox_inches='tight')
         plt.close()
         
-        # Create a heatmap showing feature importance across phases
+        # Create a heatmap showing how feature importance varies across phases
         self._plot_phase_importance_heatmap(phase_sensitivities, num_phases)
         
+        # Also save numerical data for further analysis
+        self._save_phase_sensitivity_data(phase_sensitivities)
+        
+        # Add visualization of gait phases
+        self.visualize_gait_phases(observations, phase_indices, foot_contacts)
+        
         return phase_sensitivities
+
+    def get_phase_name(self, phase, num_phases):
+        """Get a descriptive name for each phase of the gait cycle."""
+        if num_phases == 8:
+            # For an 8-phase division of a typical quadruped trot gait
+            phase_names = [
+                "Right Front Foot Strike",
+                "Right Front Stance",
+                "Right Front Foot Lift",
+                "Right Front Swing",
+                "Left Front Foot Strike",
+                "Left Front Stance",
+                "Left Front Foot Lift",
+                "Left Front Swing"
+            ]
+            return phase_names[phase] if phase < len(phase_names) else f"Phase {phase}"
+        elif num_phases == 4:
+            # For a 4-phase division
+            phase_names = [
+                "Double Support (RF+LH)",
+                "Double Support (LF+RH)",
+                "Flight Phase 1",
+                "Flight Phase 2"
+            ]
+            return phase_names[phase] if phase < len(phase_names) else f"Phase {phase}"
+        else:
+            # Generic phase names
+            fraction = phase / num_phases
+            if fraction < 0.25:
+                return "Early Stance"
+            elif fraction < 0.5:
+                return "Late Stance"
+            elif fraction < 0.75:
+                return "Early Swing"
+            else:
+                return "Late Swing"
+
+    def _save_phase_sensitivity_data(self, phase_sensitivities):
+        """Save numerical data from phase-specific sensitivity analysis."""
+        if not phase_sensitivities:
+            return
+            
+        # Create a directory for the numerical data
+        data_dir = os.path.join(self.save_dir, "phase_data")
+        os.makedirs(data_dir, exist_ok=True)
+        
+        # Save overall summary as CSV
+        summary_rows = ["Feature,Feature ID"]
+        
+        # Add phase columns to header
+        phases = sorted(phase_sensitivities.keys())
+        summary_rows[0] += "," + ",".join([f"Phase {p}" for p in phases])
+        
+        # Calculate importance for each feature in each phase
+        for i, feature_name in enumerate(self.obs_labels):
+            row = f"{feature_name},{i}"
+            
+            for phase in phases:
+                sensitivity = phase_sensitivities[phase]
+                importance = torch.norm(sensitivity[i], dim=0).item()
+                row += f",{importance:.6f}"
+                
+            summary_rows.append(row)
+        
+        # Write summary CSV
+        with open(os.path.join(data_dir, "phase_importance_summary.csv"), 'w') as f:
+            f.write("\n".join(summary_rows))
+        
+        # Also save individual phase data as numpy files
+        for phase, sensitivity in phase_sensitivities.items():
+            np.save(os.path.join(data_dir, f"phase_{phase}_sensitivity.npy"), 
+                    sensitivity.cpu().numpy())
 
     def _plot_phase_importance_heatmap(self, phase_sensitivities, num_phases):
         """Plot heatmap of feature importance across different gait phases."""
@@ -1124,90 +1220,213 @@ class PolicyAnalyzer:
         obs_dim = phase_sensitivities[first_phase].shape[0]
         
         # Prepare data for heatmap (features x phases)
-        heatmap_data = np.zeros((obs_dim, num_phases))
+        phases = sorted(phase_sensitivities.keys())
+        heatmap_data = np.zeros((obs_dim, len(phases)))
         
         # Calculate importance for each feature in each phase
-        for phase in range(num_phases):
-            if phase in phase_sensitivities:
-                # Calculate importance as L2 norm across actions
-                importance = torch.norm(phase_sensitivities[phase], dim=1).cpu().numpy()
-                heatmap_data[:, phase] = importance
+        for i, phase in enumerate(phases):
+            # Calculate importance as L2 norm across actions
+            importance = torch.norm(phase_sensitivities[phase], dim=1).cpu().numpy()
+            heatmap_data[:, i] = importance
+        
+        # Normalize each feature's importance across phases to highlight variations
+        # This makes it easier to see changes in importance, not just absolute values
+        row_maxes = np.max(heatmap_data, axis=1, keepdims=True)
+        row_maxes[row_maxes == 0] = 1  # Avoid division by zero
+        normalized_heatmap = heatmap_data / row_maxes
         
         # Sort features by overall importance
         overall_importance = heatmap_data.sum(axis=1)
         sorted_indices = np.argsort(-overall_importance)
         
-        # Select top 25 features for better visualization
-        top_indices = sorted_indices[:25]
-        top_data = heatmap_data[top_indices, :]
-        top_labels = [self.obs_labels[i] for i in top_indices]
+        # Select top features for better visualization
+        top_k = min(25, len(sorted_indices))
+        top_indices = sorted_indices[:top_k]
+        top_data = normalized_heatmap[top_indices, :]
+        top_labels = [f"{self.obs_labels[i]} (#{i})" for i in top_indices]
         
-        # Create heatmap
+        # Create figure for the heatmap
         plt.figure(figsize=(12, 10))
-        if HAS_SEABORN:
-            sns.heatmap(top_data, cmap='viridis', 
-                       xticklabels=range(num_phases),
-                       yticklabels=top_labels,
-                       cbar_kws={'label': 'Feature Importance'})
-        else:
-            plt.imshow(top_data, cmap='viridis', aspect='auto')
-            plt.colorbar(label='Feature Importance')
-            plt.yticks(np.arange(len(top_labels)), top_labels)
-            plt.xticks(np.arange(num_phases), range(num_phases))
         
-        plt.title("Feature Importance Across Gait Phases", fontsize=14, fontweight='bold')
-        plt.xlabel("Gait Phase", fontweight='bold')
-        plt.ylabel("Feature", fontweight='bold')
+        # Get phase names
+        phase_names = [f"{p}: {self.get_phase_name(p, num_phases)}" for p in phases]
+        
+        # Plot using seaborn if available, otherwise matplotlib
+        if HAS_SEABORN:
+            # Create a diverging colormap to highlight differences
+            cmap = sns.color_palette("viridis", as_cmap=True)
+            
+            # Plot with seaborn for nicer aesthetics
+            ax = sns.heatmap(top_data, cmap=cmap, 
+                            xticklabels=phase_names,
+                            yticklabels=top_labels,
+                            cbar_kws={'label': 'Normalized Importance'})
+            
+            # Rotate x-axis labels for readability
+            plt.xticks(rotation=45, ha='right')
+            
+        else:
+            # Matplotlib alternative
+            plt.imshow(top_data, cmap='viridis', aspect='auto')
+            plt.colorbar(label='Normalized Importance')
+            plt.yticks(np.arange(len(top_labels)), top_labels)
+            plt.xticks(np.arange(len(phases)), phase_names, rotation=45, ha='right')
+        
+        plt.title("Feature Importance Variation Across Gait Phases", fontsize=14, fontweight='bold')
         plt.tight_layout()
         
+        # Save the heatmap
         plt.savefig(f"{self.save_dir}/phase_importance_heatmap.png", dpi=300, bbox_inches='tight')
         plt.close()
+        
+        # Also create a non-normalized version to show absolute values
+        plt.figure(figsize=(12, 10))
+        if HAS_SEABORN:
+            ax = sns.heatmap(heatmap_data[top_indices, :], cmap='viridis', 
+                            xticklabels=phase_names,
+                            yticklabels=top_labels,
+                            cbar_kws={'label': 'Absolute Importance'})
+            plt.xticks(rotation=45, ha='right')
+        else:
+            plt.imshow(heatmap_data[top_indices, :], cmap='viridis', aspect='auto')
+            plt.colorbar(label='Absolute Importance')
+            plt.yticks(np.arange(len(top_labels)), top_labels)
+            plt.xticks(np.arange(len(phases)), phase_names, rotation=45, ha='right')
+        
+        plt.title("Absolute Feature Importance by Gait Phase", fontsize=14, fontweight='bold')
+        plt.tight_layout()
+        plt.savefig(f"{self.save_dir}/phase_importance_absolute.png", dpi=300, bbox_inches='tight')
+        plt.close()
 
-    def detect_gait_phases_from_contacts(self, observations, foot_contacts, num_phases=8):
-        """More accurate gait phase detection using foot contact information."""
-        # Assuming foot_contacts is a tensor [num_samples, num_feet]
-        num_feet = foot_contacts.shape[1]
+    def visualize_gait_phases(self, observations, phase_indices, foot_contacts=None):
+        """
+        Create a visual representation of the different gait phases.
         
-        # Detect gait cycles using foot contact patterns
-        # For a quadruped, typically one full gait cycle happens when all feet complete 
-        # their stance-swing-stance pattern
+        Args:
+            observations: Tensor of collected observations
+            phase_indices: Dictionary mapping phase numbers to observation indices
+            foot_contacts: Tensor of foot contact information (if available)
+        """
+        # Skip if matplotlib is not available
+        try:
+            import matplotlib.pyplot as plt
+        except ImportError:
+            print("Matplotlib not available, skipping gait phase visualization.")
+            return
         
-        # Example for typical quadruped gaits:
-        # 1. Calculate which foot is the reference limb (e.g., front right)
-        ref_limb = 0  # Front right foot
+        # Set up the figure
+        phases = sorted(phase_indices.keys())
+        fig, axes = plt.subplots(len(phases), 1, figsize=(15, 3*len(phases)))
+        if len(phases) == 1:
+            axes = [axes]
         
-        # 2. Detect touchdown events (contact transitions from 0 to 1)
-        contact_changes = foot_contacts[1:, ref_limb] - foot_contacts[:-1, ref_limb]
-        touchdown_indices = torch.where(contact_changes == 1)[0] + 1
+        # For each phase, plot a representative state
+        for i, phase in enumerate(phases):
+            ax = axes[i]
+            phase_idx = phase_indices[phase]
+            
+            if len(phase_idx) == 0:
+                ax.text(0.5, 0.5, f"No samples for phase {phase}", 
+                       ha='center', va='center', fontsize=14)
+                continue
+            
+            # Get a representative observation for this phase
+            rep_idx = phase_idx[len(phase_idx) // 2]  # Middle observation
+            rep_obs = observations[rep_idx].cpu().numpy()
+            
+            # Extract joint positions (assuming they start at index 13)
+            # Adjust these indices based on your actual observation structure
+            joint_indices = range(13, 13 + 12)  # Assuming 12 joints for quadruped
+            joint_positions = rep_obs[joint_indices]
+            
+            # Create a simplified visualization of the robot state
+            self._draw_robot_state(ax, joint_positions, phase, foot_contacts[rep_idx] if foot_contacts is not None else None)
+            
+            # Add phase description
+            phase_name = self.get_phase_name(phase, len(phases))
+            ax.set_title(f"Phase {phase}: {phase_name}", fontsize=12, fontweight='bold')
         
-        # 3. Each pair of consecutive touchdowns defines one stride
-        if len(touchdown_indices) < 2:
-            print("Warning: Not enough gait cycles detected. Falling back to time-based phases.")
-            # Fall back to time-based phases
-            return detect_gait_phases(observations, None, num_phases)
+        plt.tight_layout()
+        plt.savefig(f"{self.save_dir}/gait_phase_visualization.png", dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def _draw_robot_state(self, ax, joint_positions, phase, foot_contacts=None):
+        """
+        Draw a simplified representation of the robot's state in a given gait phase.
         
-        # 4. Identify phases within each stride
-        phases = []
-        for i in range(len(observations)):
-            # Find which stride this observation belongs to
-            stride_idx = np.searchsorted(touchdown_indices, i) - 1
-            if stride_idx >= 0 and stride_idx < len(touchdown_indices) - 1:
-                stride_start = touchdown_indices[stride_idx]
-                stride_end = touchdown_indices[stride_idx + 1]
-                # Calculate phase within this stride (0 to num_phases-1)
-                stride_progress = (i - stride_start) / (stride_end - stride_start)
-                phase = int(stride_progress * num_phases) % num_phases
-            else:
-                # For observations before first touchdown or after last one
-                phase = 0
-            phases.append(phase)
+        Args:
+            ax: Matplotlib axis to draw on
+            joint_positions: Joint angles for the robot
+            phase: Phase number
+            foot_contacts: Contact state for each foot (if available)
+        """
+        # Create a simplified top-down view of a quadruped
+        # This is a very basic visualization - you may want to enhance it
         
-        # Group observation indices by phase
-        phase_indices = {}
-        for phase in range(num_phases):
-            phase_indices[phase] = np.where(np.array(phases) == phase)[0]
+        # Define robot dimensions
+        body_length = 0.5
+        body_width = 0.25
+        leg_length = 0.3
         
-        return phase_indices
+        # Basic rectangular body
+        body = plt.Rectangle((-body_length/2, -body_width/2), body_length, body_width, 
+                           fill=True, color='lightgray', alpha=0.7)
+        ax.add_patch(body)
+        
+        # Head indicator (front of robot)
+        head = plt.Circle((body_length/2, 0), 0.05, fill=True, color='gray')
+        ax.add_patch(head)
+        
+        # Foot positions - simplistic calculation based on joint angles
+        # In a real implementation, you would use proper kinematics
+        foot_positions = [
+            # Front right
+            (body_length/2, -body_width/2 - leg_length * np.cos(joint_positions[0])),
+            # Front left
+            (body_length/2, body_width/2 + leg_length * np.cos(joint_positions[3])),
+            # Rear right
+            (-body_length/2, -body_width/2 - leg_length * np.cos(joint_positions[6])),
+            # Rear left
+            (-body_length/2, body_width/2 + leg_length * np.cos(joint_positions[9]))
+        ]
+        
+        # Draw legs and feet
+        foot_labels = ["FR", "FL", "RR", "RL"]
+        for i, (fx, fy) in enumerate(foot_positions):
+            # Determine if foot is in contact (red = contact, blue = no contact)
+            in_contact = foot_contacts[i] > 0.5 if foot_contacts is not None else (phase % 2 == i % 2)
+            color = 'red' if in_contact else 'blue'
+            
+            # Draw leg
+            if i < 2:  # Front legs
+                start_x = body_length/2
+            else:  # Rear legs
+                start_x = -body_length/2
+                
+            if i % 2 == 0:  # Right legs
+                start_y = -body_width/2
+            else:  # Left legs
+                start_y = body_width/2
+                
+            ax.plot([start_x, fx], [start_y, fy], 'k-', linewidth=2)
+            
+            # Draw foot
+            foot = plt.Circle((fx, fy), 0.05, fill=True, color=color)
+            ax.add_patch(foot)
+            ax.text(fx, fy + 0.07, foot_labels[i], ha='center')
+        
+        # Add a legend
+        red_patch = plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='red', markersize=10, label='Foot Contact')
+        blue_patch = plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', markersize=10, label='Foot in Air')
+        ax.legend(handles=[red_patch, blue_patch], loc='upper right')
+        
+        # Set axis limits and appearance
+        ax.set_xlim(-body_length - leg_length, body_length + leg_length)
+        ax.set_ylim(-body_width - leg_length, body_width + leg_length)
+        ax.set_aspect('equal')
+        ax.grid(True, linestyle='--', alpha=0.7)
+        ax.set_xlabel('Forward/Backward')
+        ax.set_ylabel('Left/Right')
 
 def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, device="cpu"):
     """
