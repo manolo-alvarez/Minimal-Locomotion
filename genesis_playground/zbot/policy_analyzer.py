@@ -1753,8 +1753,151 @@ def analyze_with_command_variation(env, policy, commands=None):
     # Average importance across command scenarios
     aggregate_importance /= len(results)
     
-    # Plot aggregated results
-    # ...
+def analyze_with_multiple_seeds(env, runner, save_dir, num_samples=1000, seeds=None, device="cpu"):
+    """
+    Run feature importance analysis with multiple seeds and aggregate results.
+    
+    Args:
+        env: Environment
+        runner: Policy runner
+        save_dir: Directory to save results
+        num_samples: Number of samples to collect per run
+        seeds: List of seeds to use
+        device: Device to run on
+        
+    Returns:
+        Aggregated results and a combined analyzer with variance information
+    """
+    if seeds is None:
+        seeds = [0]
+    
+    os.makedirs(save_dir, exist_ok=True)
+    
+    # Get policy once
+    policy = runner.get_inference_policy(device=device)
+    
+    # Get observation labels once
+    obs_labels = env.get_observation_labels()
+    
+    # Store sensitivity matrices from each seed
+    all_sensitivities = []
+    
+    # Define a consistent set of commands to use for all seeds
+    # This ensures we're measuring variation due to seeds, not commands
+    fixed_commands = [
+        {"x": 1.0, "y": 0.0, "yaw": 0.0},   # Forward
+        {"x": 0.0, "y": 1.0, "yaw": 0.0},   # Lateral
+        {"x": 0.0, "y": 0.0, "yaw": 1.0},   # Turn
+        {"x": 0.7, "y": 0.7, "yaw": 0.0},   # Diagonal
+        {"x": -0.7, "y": 0.0, "yaw": 0.0},  # Backward
+    ]
+    
+    # Run analysis for each seed
+    for i, seed in enumerate(seeds):
+        print(f"\n--- Running analysis with seed {seed} ({i+1}/{len(seeds)}) ---\n")
+        
+        # Create a directory for this seed's results
+        seed_dir = os.path.join(save_dir, f"seed_{seed}")
+        os.makedirs(seed_dir, exist_ok=True)
+        
+        # Create analyzer for this seed
+        analyzer = PolicyAnalyzer(
+            policy=policy,
+            obs_labels=obs_labels,
+            action_labels=env.get_action_labels() if hasattr(env, "get_action_labels") else None,
+            device=device,
+            save_dir=seed_dir
+        )
+        
+        # Set the random seed before collecting observations
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+        
+        # Collect observations with fixed sequence of commands
+        print(f"Collecting {num_samples} observations with seed {seed}...")
+        
+        # Reset environment to ensure consistency
+        env.reset()
+        obs, extras = env.get_observations()
+        
+        observations = []
+        for j in range(num_samples):
+            # Use the same command sequence for each seed
+            cmd = fixed_commands[j % len(fixed_commands)]
+            
+            # Apply command to observation
+            obs_copy = obs.clone()
+            obs_copy[:, 6] = cmd["x"]
+            obs_copy[:, 7] = cmd["y"]
+            obs_copy[:, 8] = cmd["yaw"]
+            
+            # Get policy action
+            with torch.no_grad():
+                action = policy(obs_copy)
+            
+            # Step environment
+            result = env.step(action)
+            
+            # Handle different return formats
+            if len(result) == 4:
+                obs, _, _, _ = result
+            elif len(result) == 5:
+                obs, _, _, _, _ = result
+            else:
+                obs = result[0]
+            
+            # Store observation
+            observations.append(obs_copy[0].clone())
+            
+            # Progress
+            if (j+1) % (num_samples // 10) == 0:
+                print(f"Collected {j+1}/{num_samples} samples")
+        
+        # Stack observations
+        observations = torch.stack(observations).to(device)
+        
+        # Run the analysis for this seed
+        analyzer.run_full_analysis(observations, seed=seed)
+        
+        # Extract sensitivity matrix and store it
+        if analyzer.normalized_sensitivity_matrix is not None:
+            sensitivity = torch.norm(analyzer.normalized_sensitivity_matrix, dim=1).cpu().numpy()
+            all_sensitivities.append(sensitivity)
+    
+    # If we have results from multiple seeds, calculate statistics
+    if len(all_sensitivities) > 0:
+        # Stack all sensitivities to create a 2D array (seed × feature)
+        sensitivities_array = np.stack(all_sensitivities)
+        
+        # Calculate statistics across seeds
+        mean_importance = np.mean(sensitivities_array, axis=0)
+        std_importance = np.std(sensitivities_array, axis=0)
+        min_importance = np.min(sensitivities_array, axis=0)
+        max_importance = np.max(sensitivities_array, axis=0)
+        
+        # Create aggregated analyzer for combined results
+        aggregate_analyzer = PolicyAnalyzer(
+            policy=policy,
+            obs_labels=obs_labels,
+            action_labels=env.get_action_labels() if hasattr(env, "get_action_labels") else None,
+            device=device,
+            save_dir=save_dir
+        )
+        
+        # Create feature importance plot with variance bars
+        plot_feature_importance_with_variance(
+            obs_labels,
+            mean_importance, 
+            std_importance,
+            min_importance,
+            max_importance,
+            save_dir,
+            seeds=seeds
+        )
+        
+        return aggregate_analyzer
+    
+    return None
 
 def detect_gait_phases_from_contacts(self, observations, foot_contacts, num_phases=8):
     """
@@ -1846,6 +1989,100 @@ def detect_gait_phases_from_contacts(self, observations, foot_contacts, num_phas
         print(f"Phase {phase}: {len(phase_indices[phase])} samples")
     
     return phase_indices
+
+def plot_feature_importance_with_variance(obs_labels, mean_importance, std_importance, 
+                                         min_importance, max_importance, save_dir, seeds=None):
+    """
+    Create a feature importance plot with variance bars.
+    
+    Args:
+        obs_labels: Labels for the observation features
+        mean_importance: Mean importance values
+        std_importance: Standard deviation of importance
+        min_importance: Minimum importance values
+        max_importance: Maximum importance values
+        save_dir: Directory to save the plot
+        seeds: List of seeds used for analysis
+    """
+    
+    # Sort features by mean importance (highest to lowest)
+    sorted_indices = np.argsort(-mean_importance)
+    
+    # Limit to top features for better visualization
+    top_k = min(40, len(sorted_indices))
+    top_indices = sorted_indices[:top_k]
+    
+    # Extract values for top features
+    top_labels = [f"{obs_labels[i]} (#{i})" for i in top_indices]
+    top_means = mean_importance[top_indices]
+    top_stds = std_importance[top_indices]
+    top_mins = min_importance[top_indices]
+    top_maxes = max_importance[top_indices]
+    
+    # Create figure
+    plt.figure(figsize=(14, max(10, top_k * 0.3)))
+    
+    # Create horizontal bar chart
+    y_pos = np.arange(top_k)
+    
+    # Plot the bars with mean values
+    bars = plt.barh(y_pos, top_means, align='center', alpha=0.7, 
+                   color=plt.cm.viridis(np.linspace(0.1, 0.9, top_k)))
+    
+    # Add min-max range as BLACK lines
+    for i in range(top_k):
+        # Horizontal line showing min-max range
+        plt.plot([top_mins[i], top_maxes[i]], [y_pos[i], y_pos[i]], 'k-', linewidth=2.5, alpha=0.8)
+        # Vertical caps at min and max
+        plt.plot([top_mins[i]], [y_pos[i]], 'k|', markersize=10)
+        plt.plot([top_maxes[i]], [y_pos[i]], 'k|', markersize=10)
+    
+    # Add standard deviation indicators in RED
+    plt.errorbar(top_means, y_pos, xerr=top_stds, fmt='none', ecolor='red', 
+                capsize=5, alpha=0.8, label='±1 Std Dev')
+    
+    # Add value labels with standard deviation
+    for i in range(top_k):
+        plt.text(top_means[i] + 0.01, y_pos[i], 
+                f'{top_means[i]:.3f} ±{top_stds[i]:.3f}', 
+                va='center', fontsize=9)
+    
+    # Improve aesthetics
+    plt.yticks(y_pos, top_labels)
+    plt.xlabel('Feature Importance (Mean Across Seeds)', fontweight='bold')
+    plt.title('Feature Importance Ranking with Variance Across Seeds', 
+             fontsize=14, fontweight='bold')
+    
+    # Add legend for clarity
+    plt.plot([], [], 'k-', label='Min-Max Range')
+    plt.legend(loc='lower right')
+    
+    # Add seeds information as text
+    if seeds:
+        plt.figtext(0.02, 0.01, f"Based on {len(seeds)} seeds: {', '.join(map(str, seeds))}", 
+                   fontsize=8)
+    
+    # Add grid for easier reading
+    plt.grid(axis='x', alpha=0.3)
+    
+    plt.tight_layout()
+    
+    # Save the figure with clear naming
+    plt.savefig(f"{save_dir}/feature_importance_with_variance.png", dpi=300, bbox_inches='tight')
+    plt.savefig(f"{save_dir}/feature_importance_with_variance.pdf", bbox_inches='tight')
+    
+    # Print confirmation
+    print(f"Saved feature importance plot with variance bars to:")
+    print(f"  - {save_dir}/feature_importance_with_variance.png")
+    print(f"  - {save_dir}/feature_importance_with_variance.pdf")
+    
+    # Also save the data in CSV format for further analysis
+    with open(f"{save_dir}/feature_importance_with_variance.csv", 'w') as f:
+        f.write("feature,feature_id,mean,std,min,max\n")
+        for idx in sorted_indices:
+            name = obs_labels[idx] if idx < len(obs_labels) else f"Feature_{idx}"
+            f.write(f"{name},{idx},{mean_importance[idx]:.6f},{std_importance[idx]:.6f},"
+                   f"{min_importance[idx]:.6f},{max_importance[idx]:.6f}\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Aggregate feature importance across runs')

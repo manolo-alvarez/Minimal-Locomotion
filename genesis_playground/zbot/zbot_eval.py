@@ -472,7 +472,7 @@ def camera_controls_callback(viewer):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="zbot-walking")
-    parser.add_argument("--ckpt", type=int, default=299)
+    parser.add_argument("--ckpt", type=int, default=300)
     parser.add_argument("--device", type=str, default="mps")
     parser.add_argument("--use_keyboard", action="store_true", help="Use keyboard for control")
     parser.add_argument("--analyze", action="store_true", help="Perform feature importance analysis")
@@ -481,8 +481,8 @@ def main():
     parser.add_argument("--analysis_type", type=str, default="standard", 
                       choices=["standard", "robust", "command_variation", "phase_aware"],
                       help="Type of feature analysis to perform")
-    parser.add_argument("--analysis_seed", type=int, default=None,
-                      help="Random seed for feature analysis (use None for random results)")
+    parser.add_argument("--analysis_seeds", type=str, default="0",
+                      help="Comma-separated list of random seeds for feature analysis (e.g., '0,42,123')")
     parser.add_argument("--show_viewer", action="store_true", default=True,
                       help="Show the Genesis viewer")
     parser.add_argument("--log_dir", type=str, default="logs",
@@ -519,19 +519,35 @@ def main():
     # If analyze flag is set, perform feature importance analysis
     if args.analyze:
         save_dir = f"{args.log_dir}/{args.exp_name}/feature_analysis"
-        if args.analysis_seed is not None:
-            save_dir += f"_seed{args.analysis_seed}"
+        
+        # Parse seeds from command line argument
+        seeds = [int(s) for s in args.analysis_seeds.split(',')]
+        print(f"Running analysis with {len(seeds)} seeds: {seeds}")
         
         if args.analysis_type == "standard":
             print("Running standard feature analysis...")
-            analyzer = analyze_policy(
-                env, 
-                runner, 
-                save_dir=save_dir,
-                num_samples=args.analysis_samples,
-                device=args.device,
-                seed=args.analysis_seed
-            )
+            if len(seeds) > 1:
+                # Multiple seeds - run aggregate analysis
+                from policy_analyzer import analyze_with_multiple_seeds
+                analyzer = analyze_with_multiple_seeds(
+                    env, 
+                    runner, 
+                    save_dir=save_dir,
+                    num_samples=args.analysis_samples,
+                    seeds=seeds,
+                    device=args.device
+                )
+            else:
+                # Single seed - run normal analysis
+                from policy_analyzer import analyze_policy
+                analyzer = analyze_policy(
+                    env, 
+                    runner, 
+                    save_dir=save_dir,
+                    num_samples=args.analysis_samples,
+                    device=args.device,
+                    seed=seeds[0]
+                )
         
         elif args.analysis_type == "robust":
             print("Running robust feature analysis across multiple base points...")
