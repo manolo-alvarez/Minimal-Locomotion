@@ -1007,32 +1007,25 @@ class PolicyAnalyzer:
         np.save(f"{self.save_dir}/sensitivity_aggregated.npy", 
                self.normalized_sensitivity_matrix.cpu().numpy())
 
-    def phase_aware_sensitivity_analysis(self, observations, env, num_phases=8, perturbation_scale=0.01, phase_indices=None, foot_contacts=None):
+    def phase_aware_sensitivity_analysis(self, observations, env, num_phases=8, 
+                                   perturbation_scale=0.01, phase_indices=None,
+                                   foot_contacts=None):
         """
         Analyze feature sensitivity across different phases of the gait cycle.
-        
-        Args:
-            observations: Collected observations tensor
-            env: Environment instance for gait phase detection
-            num_phases: Number of phases to divide the gait cycle into (if detecting phases)
-            perturbation_scale: Scale of perturbations for sensitivity analysis
-            phase_indices: Pre-computed phase indices (dictionary mapping phase number to observation indices)
-            foot_contacts: Tensor of foot contact information (if available)
         """
         # First collect overall statistics
+        print("Collecting overall statistics...")
         self.collect_statistics(observations)
         
         # Detect gait phases if not provided
         if phase_indices is None:
             print(f"Detecting {num_phases} gait phases...")
-            phase_indices = detect_gait_phases(observations, env, num_phases)
+            # Call as instance method
+            phase_indices = self.detect_gait_phases(observations, env, num_phases)
         else:
             # Use provided phases, but update num_phases if needed
             num_phases = max(phase_indices.keys()) + 1
             print(f"Using pre-computed gait phases ({num_phases} phases)")
-        
-        # Initialize storage for phase-specific sensitivities
-        phase_sensitivities = {}
         
         # Get observation and action dimensions
         obs_dim = observations.shape[1]
@@ -1042,26 +1035,42 @@ class PolicyAnalyzer:
             test_action = self.policy(observations[:1])
         action_dim = test_action.shape[1]
         
+        # Initialize storage for phase-specific sensitivities
+        phase_sensitivities = {}
+        
+        # Print debug info
+        print(f"Analyzing sensitivity across {num_phases} phases")
+        print(f"Observation dimension: {obs_dim}")
+        print(f"Action dimension: {action_dim}")
+        
         # Create a subplot grid for phase-specific importance plots
-        fig, axes = plt.subplots(2, 4, figsize=(20, 10)) if num_phases == 8 else plt.subplots(
-            int(np.ceil(num_phases/4)), 4, figsize=(20, 5*np.ceil(num_phases/4)))
+        num_rows = max(2, int(np.ceil(num_phases/4)))
+        fig, axes = plt.subplots(num_rows, 4, figsize=(20, 5*num_rows))
         axes = axes.flatten()
         
         # For each phase, compute a separate sensitivity matrix
-        for phase in sorted(phase_indices.keys()):
-            phase_idx = phase_indices[phase]
+        for phase_idx, phase in enumerate(sorted(phase_indices.keys())):
+            phase_sample_indices = phase_indices[phase]
             
-            if len(phase_idx) < 5:
-                print(f"Warning: Phase {phase} has too few samples ({len(phase_idx)}). Skipping.")
+            if len(phase_sample_indices) < 5:
+                print(f"Warning: Phase {phase} has too few samples ({len(phase_sample_indices)}). Skipping.")
+                if phase_idx < len(axes):
+                    axes[phase_idx].text(0.5, 0.5, f"Phase {phase}: Not enough samples", 
+                                       ha='center', va='center', fontsize=14)
+                    axes[phase_idx].set_title(f"Phase {phase}: Skipped (insufficient data)")
                 continue
                 
-            print(f"Analyzing phase {phase}/{num_phases-1} with {len(phase_idx)} samples")
+            print(f"Analyzing phase {phase}/{num_phases-1} with {len(phase_sample_indices)} samples")
             
-            # Get mean observation for this phase
-            phase_observations = observations[phase_idx]
-            base_obs = phase_observations.mean(dim=0, keepdim=True)
+            # Get representative observation for this phase
+            phase_observations = observations[phase_sample_indices]
+            base_obs = phase_observations.mean(dim=0, keepdim=True).to(self.device)
             
-            # Create a new sensitivity matrix for this phase
+            # Debug info
+            print(f"  Phase {phase} base observation shape: {base_obs.shape}")
+            print(f"  Min: {base_obs.min().item():.4f}, Max: {base_obs.max().item():.4f}")
+            
+            # Initialize phase-specific sensitivity matrix
             phase_sensitivity = torch.zeros((obs_dim, action_dim), device=self.device)
             
             # Compute sensitivity for this phase using central difference method
@@ -1086,18 +1095,28 @@ class PolicyAnalyzer:
                 
                 # Store in phase-specific sensitivity matrix
                 phase_sensitivity[i] = feature_sensitivity
-                
+            
+            # Check for NaN values
+            if torch.isnan(phase_sensitivity).any():
+                print(f"Warning: NaN values detected in phase {phase} sensitivity. Replacing with zeros.")
+                phase_sensitivity = torch.nan_to_num(phase_sensitivity, nan=0.0)
+            
             # Store this phase's sensitivity
             phase_sensitivities[phase] = phase_sensitivity
             
-            # Calculate feature importance for this phase
+            # Calculate feature importance for this specific phase
             feature_importance = torch.norm(phase_sensitivity, dim=1).cpu().numpy()
             
+            # Skip plotting if we have too many phases for our grid
+            if phase_idx >= len(axes):
+                print(f"Warning: Too many phases to plot all individually.")
+                continue
+                
             # Sort features by importance for this specific phase
             sorted_indices = np.argsort(-feature_importance)[:20]  # Top 20 features
             
             # Plot in the appropriate subplot
-            ax = axes[phase]
+            ax = axes[phase_idx]
             labels = [f"{self.obs_labels[i]}" for i in sorted_indices]
             values = feature_importance[sorted_indices]
             
@@ -1110,14 +1129,19 @@ class PolicyAnalyzer:
             phase_name = self.get_phase_name(phase, num_phases)
             ax.set_title(f"Phase {phase}: {phase_name}", fontweight='bold')
             
-            if phase % 4 == 0:
+            # Add axis labels where appropriate
+            if phase_idx % 4 == 0:
                 ax.set_ylabel("Features")
-            if phase >= num_phases-4:
+            if phase_idx >= len(phase_indices) - 4 or phase_idx >= len(axes) - 4:
                 ax.set_xlabel("Importance")
                 
-            # Add importance values as text
-            for i, v in enumerate(values):
-                ax.text(v + 0.01, i, f"{v:.3f}", va='center', fontsize=7)
+            # Print the top 3 features for this phase for debugging
+            top3_features = [(self.obs_labels[i], feature_importance[i]) for i in sorted_indices[:3]]
+            print(f"  Top 3 features for phase {phase}: {top3_features}")
+        
+        # Hide unused subplots
+        for i in range(len(phase_indices), len(axes)):
+            axes[i].set_visible(False)
         
         # Add overall title
         plt.suptitle("Feature Importance by Gait Phase", fontsize=16, fontweight='bold', y=0.98)
@@ -1130,11 +1154,14 @@ class PolicyAnalyzer:
         # Create a heatmap showing how feature importance varies across phases
         self._plot_phase_importance_heatmap(phase_sensitivities, num_phases)
         
+        # Visualize the robot state in different phases
+        try:
+            self.visualize_gait_phases(observations, phase_indices, foot_contacts)
+        except Exception as e:
+            print(f"Warning: Could not visualize gait phases: {e}")
+        
         # Also save numerical data for further analysis
         self._save_phase_sensitivity_data(phase_sensitivities)
-        
-        # Add visualization of gait phases
-        self.visualize_gait_phases(observations, phase_indices, foot_contacts)
         
         return phase_sensitivities
 
@@ -1307,22 +1334,41 @@ class PolicyAnalyzer:
             phase_indices: Dictionary mapping phase numbers to observation indices
             foot_contacts: Tensor of foot contact information (if available)
         """
-        # Skip if matplotlib is not available
         try:
             import matplotlib.pyplot as plt
+            from matplotlib.patches import Rectangle, Circle
         except ImportError:
             print("Matplotlib not available, skipping gait phase visualization.")
             return
         
         # Set up the figure
         phases = sorted(phase_indices.keys())
-        fig, axes = plt.subplots(len(phases), 1, figsize=(15, 3*len(phases)))
-        if len(phases) == 1:
-            axes = [axes]
+        
+        # For quadruped visualization, use a 2-row layout
+        if len(phases) <= 4:
+            rows, cols = 1, len(phases)
+        else:
+            cols = 4
+            rows = (len(phases) + 3) // 4
+        
+        fig, axes = plt.subplots(rows, cols, figsize=(cols*4, rows*3))
+        if rows == 1 and cols == 1:
+            axes = np.array([axes])  # Make 1D for consistent indexing
+        elif rows == 1 or cols == 1:
+            axes = axes.flatten()
+        
+        print(f"Visualizing {len(phases)} gait phases...")
         
         # For each phase, plot a representative state
         for i, phase in enumerate(phases):
-            ax = axes[i]
+            # Get the correct subplot
+            if rows == 1:
+                ax = axes[i % cols]
+            elif cols == 1:
+                ax = axes[i // cols]
+            else:
+                ax = axes[i // cols, i % cols]
+            
             phase_idx = phase_indices[phase]
             
             if len(phase_idx) == 0:
@@ -1330,23 +1376,56 @@ class PolicyAnalyzer:
                        ha='center', va='center', fontsize=14)
                 continue
             
-            # Get a representative observation for this phase
+            # Get a representative observation for this phase - use middle observation
             rep_idx = phase_idx[len(phase_idx) // 2]  # Middle observation
             rep_obs = observations[rep_idx].cpu().numpy()
             
-            # Extract joint positions (assuming they start at index 13)
-            # Adjust these indices based on your actual observation structure
-            joint_indices = range(13, 13 + 12)  # Assuming 12 joints for quadruped
-            joint_positions = rep_obs[joint_indices]
+            # If foot contacts were provided, get them for this observation
+            phase_contacts = None
+            if foot_contacts is not None:
+                if rep_idx < len(foot_contacts):  # Make sure we don't go out of bounds
+                    phase_contacts = foot_contacts[rep_idx].cpu().numpy()
+                    print(f"  Phase {phase} foot contacts: {phase_contacts}")
+                else:
+                    print(f"  Warning: No foot contact data available for phase {phase} (idx {rep_idx})")
             
-            # Create a simplified visualization of the robot state
-            self._draw_robot_state(ax, joint_positions, phase, foot_contacts[rep_idx] if foot_contacts is not None else None)
+            # Get joint positions from observation
+            # These indices are specific to ZBot format - adjust if needed
+            joint_start_idx = 13  # Typical starting index for joint positions in ZBot
+            num_joints = 12      # Typical number of joints in a quadruped
+            
+            # Check if we have enough observation dimensions
+            if rep_obs.size >= joint_start_idx + num_joints:
+                joint_positions = rep_obs[joint_start_idx:joint_start_idx+num_joints]
+                print(f"  Phase {phase} joint positions: {joint_positions[:4]}...")
+            else:
+                print(f"  Warning: Observation doesn't have enough dimensions for joint positions")
+                joint_positions = np.zeros(num_joints)
+            
+            # Draw simplified robot visualization
+            self._draw_robot_state(ax, joint_positions, phase, phase_contacts)
             
             # Add phase description
             phase_name = self.get_phase_name(phase, len(phases))
             ax.set_title(f"Phase {phase}: {phase_name}", fontsize=12, fontweight='bold')
         
+        # Hide any unused subplots
+        total_subplots = rows * cols
+        for i in range(len(phases), total_subplots):
+            if rows == 1:
+                if i < len(axes):
+                    axes[i].set_visible(False)
+            elif cols == 1:
+                if i < len(axes):
+                    axes[i].set_visible(False)
+            else:
+                row_idx = i // cols
+                col_idx = i % cols
+                if row_idx < rows and col_idx < cols:
+                    axes[row_idx, col_idx].set_visible(False)
+        
         plt.tight_layout()
+        plt.suptitle("Robot State Across Gait Phases", fontsize=14, fontweight='bold', y=1.02)
         plt.savefig(f"{self.save_dir}/gait_phase_visualization.png", dpi=300, bbox_inches='tight')
         plt.close()
 
@@ -1361,12 +1440,22 @@ class PolicyAnalyzer:
             foot_contacts: Contact state for each foot (if available)
         """
         # Create a simplified top-down view of a quadruped
-        # This is a very basic visualization - you may want to enhance it
+        # This is a very basic visualization - adjust as needed for your robot
         
         # Define robot dimensions
         body_length = 0.5
         body_width = 0.25
         leg_length = 0.3
+        
+        # Convert joint positions to leg extension percentages (simplified)
+        # This is just a visual approximation, not physically accurate
+        hip_angles = joint_positions[[0, 3, 6, 9]]  # Example hip joints
+        knee_angles = joint_positions[[1, 4, 7, 10]]  # Example knee joints
+        
+        # Calculate extension percentage for each leg (0 = fully extended, 1 = fully compressed)
+        # This is a very simplistic model - replace with actual kinematics if available
+        leg_extensions = np.abs(np.sin(hip_angles) * np.cos(knee_angles))
+        leg_extensions = np.clip(leg_extensions, 0.2, 1.0)  # Keep within reasonable range
         
         # Basic rectangular body
         body = plt.Rectangle((-body_length/2, -body_width/2), body_length, body_width, 
@@ -1377,27 +1466,42 @@ class PolicyAnalyzer:
         head = plt.Circle((body_length/2, 0), 0.05, fill=True, color='gray')
         ax.add_patch(head)
         
-        # Foot positions - simplistic calculation based on joint angles
-        # In a real implementation, you would use proper kinematics
+        # Foot positions based on leg extensions
         foot_positions = [
-            # Front right
-            (body_length/2, -body_width/2 - leg_length * np.cos(joint_positions[0])),
+            # Front right - adjust x/y based on extension
+            (body_length/2 - 0.05, -body_width/2 - leg_length * leg_extensions[0]),
             # Front left
-            (body_length/2, body_width/2 + leg_length * np.cos(joint_positions[3])),
+            (body_length/2 - 0.05, body_width/2 + leg_length * leg_extensions[1]),
             # Rear right
-            (-body_length/2, -body_width/2 - leg_length * np.cos(joint_positions[6])),
+            (-body_length/2 + 0.05, -body_width/2 - leg_length * leg_extensions[2]),
             # Rear left
-            (-body_length/2, body_width/2 + leg_length * np.cos(joint_positions[9]))
+            (-body_length/2 + 0.05, body_width/2 + leg_length * leg_extensions[3])
         ]
         
         # Draw legs and feet
         foot_labels = ["FR", "FL", "RR", "RL"]
+        
+        # Use actual foot contacts if provided, otherwise approximate based on phase
+        if foot_contacts is not None and len(foot_contacts) >= 4:
+            contact_states = foot_contacts[:4] > 0.5
+        else:
+            # Simple approximation for a trot gait
+            if len(foot_labels) == 4:  # Quadruped
+                if phase % 2 == 0:
+                    # Diagonal pair 1 (FR+RL) in contact
+                    contact_states = np.array([True, False, False, True])
+                else:
+                    # Diagonal pair 2 (FL+RR) in contact
+                    contact_states = np.array([False, True, True, False])
+            else:
+                # Default all in contact
+                contact_states = np.array([True] * len(foot_labels))
+        
         for i, (fx, fy) in enumerate(foot_positions):
-            # Determine if foot is in contact (red = contact, blue = no contact)
-            in_contact = foot_contacts[i] > 0.5 if foot_contacts is not None else (phase % 2 == i % 2)
-            color = 'red' if in_contact else 'blue'
+            # Color based on contact state
+            color = 'red' if contact_states[i] else 'blue'
             
-            # Draw leg
+            # Determine leg connection points
             if i < 2:  # Front legs
                 start_x = body_length/2
             else:  # Rear legs
@@ -1408,11 +1512,14 @@ class PolicyAnalyzer:
             else:  # Left legs
                 start_y = body_width/2
                 
+            # Draw leg
             ax.plot([start_x, fx], [start_y, fy], 'k-', linewidth=2)
             
             # Draw foot
             foot = plt.Circle((fx, fy), 0.05, fill=True, color=color)
             ax.add_patch(foot)
+            
+            # Add foot label
             ax.text(fx, fy + 0.07, foot_labels[i], ha='center')
         
         # Add a legend
@@ -1420,13 +1527,48 @@ class PolicyAnalyzer:
         blue_patch = plt.Line2D([0], [0], marker='o', color='w', markerfacecolor='blue', markersize=10, label='Foot in Air')
         ax.legend(handles=[red_patch, blue_patch], loc='upper right')
         
+        # Add phase indicator
+        ax.text(0, -body_width/2 - leg_length - 0.15, 
+               f"Phase {phase}", ha='center', fontsize=12, fontweight='bold')
+        
         # Set axis limits and appearance
-        ax.set_xlim(-body_length - leg_length, body_length + leg_length)
-        ax.set_ylim(-body_width - leg_length, body_width + leg_length)
+        ax.set_xlim(-body_length - leg_length/2, body_length + leg_length/2)
+        ax.set_ylim(-body_width - leg_length - 0.2, body_width + leg_length + 0.2)
         ax.set_aspect('equal')
         ax.grid(True, linestyle='--', alpha=0.7)
         ax.set_xlabel('Forward/Backward')
         ax.set_ylabel('Left/Right')
+    
+    def detect_gait_phases(self, observations, env, num_phases=8):
+        """
+        Detect gait phases from observations using time-based estimation.
+        
+        Args:
+            observations: Tensor of observations
+            env: Environment instance (not used in time-based estimation)
+            num_phases: Number of phases to identify
+            
+        Returns:
+            phase_indices: Dictionary mapping phase number to observation indices
+        """
+        # Estimate typical stride duration (in number of steps)
+        # For quadrupeds at normal speed, ~20-30 steps per stride is common
+        estimated_stride_steps = 20
+        
+        # Create phases based on time/step count
+        phases = np.linspace(0, 2*np.pi, estimated_stride_steps, endpoint=False)
+        phases = np.tile(phases, len(observations)//estimated_stride_steps + 1)[:len(observations)]
+        
+        # Convert to discrete phase buckets
+        discrete_phases = (phases/(2*np.pi) * num_phases).astype(int) % num_phases
+        
+        # Group observation indices by phase
+        phase_indices = {}
+        for phase in range(num_phases):
+            phase_indices[phase] = np.where(discrete_phases == phase)[0]
+            print(f"Phase {phase}: {len(phase_indices[phase])} samples")
+        
+        return phase_indices
 
 def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, device="cpu"):
     """
@@ -1614,49 +1756,94 @@ def analyze_with_command_variation(env, policy, commands=None):
     # Plot aggregated results
     # ...
 
-def detect_gait_phases_from_contacts(observations, foot_contacts, num_phases=8):
-    """More accurate gait phase detection using foot contact information."""
-    # Assuming foot_contacts is a tensor [num_samples, num_feet]
-    num_feet = foot_contacts.shape[1]
+def detect_gait_phases_from_contacts(self, observations, foot_contacts, num_phases=8):
+    """
+    More accurate gait phase detection using foot contact information.
     
-    # Detect gait cycles using foot contact patterns
-    # For a quadruped, typically one full gait cycle happens when all feet complete 
-    # their stance-swing-stance pattern
+    Args:
+        observations: Tensor of observations [num_samples, obs_dim]
+        foot_contacts: Tensor of foot contacts [num_samples, num_feet]
+        num_phases: Number of phases to identify
+        
+    Returns:
+        phase_indices: Dictionary mapping phase number to observation indices
+    """
+    print(f"Detecting gait phases from foot contacts with shape {foot_contacts.shape}")
     
-    # Example for typical quadruped gaits:
-    # 1. Calculate which foot is the reference limb (e.g., front right)
-    ref_limb = 0  # Front right foot
+    # Convert to numpy for easier processing
+    contacts_np = foot_contacts.cpu().numpy()
+    num_feet = contacts_np.shape[1]
     
-    # 2. Detect touchdown events (contact transitions from 0 to 1)
-    contact_changes = foot_contacts[1:, ref_limb] - foot_contacts[:-1, ref_limb]
-    touchdown_indices = torch.where(contact_changes == 1)[0] + 1
+    # Check if we have enough data
+    if len(observations) < 10:
+        print("Warning: Not enough observations to detect gait phases.")
+        return {0: np.arange(len(observations))}
     
-    # 3. Each pair of consecutive touchdowns defines one stride
+    # Calculate which foot is the reference limb (e.g., front right)
+    ref_limb = 0  # Front right foot by convention
+    
+    # Calculate contact transitions for reference foot
+    ref_contacts = contacts_np[:, ref_limb]
+    contact_changes = np.diff(ref_contacts)
+    
+    # Detect touchdown events (contact transitions from 0 to 1)
+    # and liftoff events (contact transitions from 1 to 0)
+    touchdown_indices = np.where(contact_changes > 0.5)[0] + 1
+    liftoff_indices = np.where(contact_changes < -0.5)[0] + 1
+    
+    print(f"Found {len(touchdown_indices)} touchdowns and {len(liftoff_indices)} liftoffs")
+    
+    # If not enough gait cycles detected, fall back to time-based
     if len(touchdown_indices) < 2:
         print("Warning: Not enough gait cycles detected. Falling back to time-based phases.")
-        # Fall back to time-based phases
-        return detect_gait_phases(observations, None, num_phases)
+        try:
+            # Call detect_gait_phases as an instance method (with self)
+            return self.detect_gait_phases(observations, None, num_phases)
+        except Exception as e:
+            print(f"Warning: Error in detect_gait_phases: {e}")
+            # Simple time-based phase detection
+            phases = np.linspace(0, num_phases, len(observations), endpoint=False).astype(int)
+            phases = phases % num_phases
+            
+            # Group by phase
+            phase_indices = {}
+            for phase in range(num_phases):
+                phase_indices[phase] = np.where(phases == phase)[0]
+            return phase_indices
     
-    # 4. Identify phases within each stride
-    phases = []
+    # Identify phases within each stride
+    phases = np.zeros(len(observations), dtype=int)
+    
     for i in range(len(observations)):
         # Find which stride this observation belongs to
         stride_idx = np.searchsorted(touchdown_indices, i) - 1
         if stride_idx >= 0 and stride_idx < len(touchdown_indices) - 1:
             stride_start = touchdown_indices[stride_idx]
             stride_end = touchdown_indices[stride_idx + 1]
+            
             # Calculate phase within this stride (0 to num_phases-1)
             stride_progress = (i - stride_start) / (stride_end - stride_start)
-            phase = int(stride_progress * num_phases) % num_phases
+            phases[i] = int(stride_progress * num_phases) % num_phases
         else:
             # For observations before first touchdown or after last one
-            phase = 0
-        phases.append(phase)
+            # Try to estimate phase from nearest stride
+            if stride_idx < 0 and len(touchdown_indices) > 0:
+                # Before first touchdown
+                phases[i] = (num_phases - int((touchdown_indices[0] - i) / 
+                                           (touchdown_indices[0] / num_phases))) % num_phases
+            elif stride_idx >= len(touchdown_indices) - 1 and len(touchdown_indices) > 1:
+                # After last touchdown
+                stride_len = touchdown_indices[-1] - touchdown_indices[-2]
+                phases[i] = int((i - touchdown_indices[-1]) / (stride_len / num_phases)) % num_phases
+            else:
+                # Default to phase 0
+                phases[i] = 0
     
     # Group observation indices by phase
     phase_indices = {}
     for phase in range(num_phases):
-        phase_indices[phase] = np.where(np.array(phases) == phase)[0]
+        phase_indices[phase] = np.where(phases == phase)[0]
+        print(f"Phase {phase}: {len(phase_indices[phase])} samples")
     
     return phase_indices
 
@@ -1667,7 +1854,7 @@ if __name__ == "__main__":
     parser.add_argument('--output_dir', type=str, default=None,
                         help='Directory to save aggregated results')
     
-    args = parser.parse_args()
+    args = argparse.ArgumentParser()
     
     # Run the aggregation
     PolicyAnalyzer.aggregate_feature_importance(args.log_folder, args.output_dir)

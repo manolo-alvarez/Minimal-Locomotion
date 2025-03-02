@@ -469,36 +469,6 @@ def camera_controls_callback(viewer):
         )
         y_pos += 20
 
-def detect_gait_phases(observations, env, num_phases=8):
-    """
-    Detect gait phases from observations using time-based estimation.
-    
-    Args:
-        observations: Tensor of observations
-        env: Environment instance (not used in time-based estimation)
-        num_phases: Number of phases to identify
-        
-    Returns:
-        phase_indices: Dictionary mapping phase number to observation indices
-    """
-    # Estimate typical stride duration (in number of steps)
-    # For quadrupeds at normal speed, ~20-30 steps per stride is common
-    estimated_stride_steps = 20
-    
-    # Create phases based on time/step count
-    phases = np.linspace(0, 2*np.pi, estimated_stride_steps, endpoint=False)
-    phases = np.tile(phases, len(observations)//estimated_stride_steps + 1)[:len(observations)]
-    
-    # Convert to discrete phase buckets
-    discrete_phases = (phases/(2*np.pi) * num_phases).astype(int) % num_phases
-    
-    # Group observation indices by phase
-    phase_indices = {}
-    for phase in range(num_phases):
-        phase_indices[phase] = np.where(discrete_phases == phase)[0]
-    
-    return phase_indices
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="zbot-walking")
@@ -619,12 +589,10 @@ def main():
             # Run phase-aware analysis
             if foot_contacts is not None:
                 print("Using foot contacts for accurate gait phase detection")
-                # Detect phases using foot contact information
                 phase_indices = analyzer.detect_gait_phases_from_contacts(observations, foot_contacts)
             else:
-                # Fall back to time-based phase detection
                 print("Falling back to time-based gait phase detection")
-                phase_indices = detect_gait_phases(observations, env)
+                phase_indices = analyzer.detect_gait_phases(observations, env)
             
             # Run the analysis with the detected phases
             analyzer.phase_aware_sensitivity_analysis(
