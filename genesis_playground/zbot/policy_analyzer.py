@@ -4,6 +4,10 @@ import torch
 import matplotlib.pyplot as plt
 from typing import Callable, List, Optional
 import os
+import argparse
+import glob
+import pandas as pd
+from collections import defaultdict
 
 # Try to import seaborn, but make it optional
 try:
@@ -562,10 +566,11 @@ class PolicyAnalyzer:
         
         # Add value labels at the end of each bar
         for i, (bar, value) in enumerate(zip(bars, values)):
-            # Only show value if it's significant (avoid cluttering with near-zero values)
+            # Only show value if it's significant
             if value > max(values) * 0.001:
-                plt.text(value + max(values) * 0.01, bar.get_y() + bar.get_height()/2, 
-                        f'{value:.5f}', va='center', fontsize=8)
+                plt.text(value - max(values) * 0.02, bar.get_y() + bar.get_height()/2, 
+                        f'{value:.5f}', va='center', ha='right', fontsize=8, 
+                        bbox=dict(facecolor='white', alpha=0.7, edgecolor='none', pad=1))
         
         # Improve aesthetics
         plt.yticks(np.arange(num_features), labels, fontsize=9)
@@ -757,6 +762,138 @@ class PolicyAnalyzer:
                 importance = feature_importance[idx]
                 f.write(f"{rank+1},{idx},{importance:.6f},{name}\n")
 
+    @staticmethod
+    def aggregate_feature_importance(log_folder, output_dir=None):
+        """
+        Aggregate feature importance data from multiple runs.
+        
+        Args:
+            log_folder: Path to folder containing subfolders with feature_importance.csv files
+            output_dir: Directory to save the aggregated results (defaults to log_folder)
+        
+        Returns:
+            DataFrame with aggregated feature importance data
+        """
+        
+        # Use log_folder as output_dir if not specified
+        if output_dir is None:
+            output_dir = log_folder
+        
+        # Find all feature_importance.csv files
+        csv_files = glob.glob(os.path.join(log_folder, '**/feature_importance.csv'), recursive=True)
+        
+        if not csv_files:
+            print(f"No feature_importance.csv files found in {log_folder}")
+            return None
+        
+        print(f"Found {len(csv_files)} feature importance files to analyze")
+        
+        # Load all CSV files
+        all_data = []
+        for csv_file in csv_files:
+            try:
+                df = pd.read_csv(csv_file)
+                all_data.append(df)
+                print(f"Processed {csv_file}: {len(df)} features")
+            except Exception as e:
+                print(f"Error processing {csv_file}: {e}")
+        
+        if not all_data:
+            print("No valid feature importance data could be processed")
+            return None
+        
+        # Create a dictionary to store importance values for each feature
+        feature_importance = defaultdict(list)
+        
+        # Collect importance values for each feature across all runs
+        for df in all_data:
+            for _, row in df.iterrows():
+                feature_name = row['feature_name']
+                importance = row['importance']
+                feature_importance[feature_name].append(importance)
+        
+        # Calculate mean importance for each feature
+        aggregated_data = []
+        for feature_name, importance_values in feature_importance.items():
+            mean_importance = np.mean(importance_values)
+            std_importance = np.std(importance_values)
+            min_importance = np.min(importance_values)
+            max_importance = np.max(importance_values)
+            count = len(importance_values)
+            
+            aggregated_data.append({
+                'feature_name': feature_name,
+                'mean_importance': mean_importance,
+                'std_importance': std_importance,
+                'min_importance': min_importance,
+                'max_importance': max_importance,
+                'count': count
+            })
+        
+        # Convert to DataFrame and sort by mean importance
+        result_df = pd.DataFrame(aggregated_data)
+        result_df = result_df.sort_values('mean_importance', ascending=False).reset_index(drop=True)
+        result_df['rank'] = result_df.index + 1
+        
+        # Save aggregated data to CSV
+        os.makedirs(output_dir, exist_ok=True)
+        output_file = os.path.join(output_dir, 'aggregated_feature_importance.csv')
+        result_df.to_csv(output_file, index=False)
+        print(f"Saved aggregated data to {output_file}")
+        
+        # Create figure with appropriate size
+        plt.figure(figsize=(12, max(8, len(result_df) * 0.25)))
+        
+        # Get data for plotting
+        features = result_df['feature_name'].tolist()
+        mean_importance = result_df['mean_importance'].tolist()
+        std_importance = result_df['std_importance'].tolist()
+        min_importance = result_df['min_importance'].tolist()
+        max_importance = result_df['max_importance'].tolist()
+        
+        # Create horizontal bar chart
+        y_pos = np.arange(len(features))
+        colors = plt.cm.viridis(np.linspace(0.1, 0.9, len(features)))
+        
+        # Plot bars for mean importance
+        bars = plt.barh(y_pos, mean_importance, align='center', color=colors, alpha=0.8, height=0.6)
+        
+        # Add range indicators (min to max)
+        for i, (min_val, max_val) in enumerate(zip(min_importance, max_importance)):
+            plt.plot([min_val, max_val], [y_pos[i], y_pos[i]], 'k-', alpha=0.3)
+            plt.plot([min_val], [y_pos[i]], 'k|', alpha=0.5)
+            plt.plot([max_val], [y_pos[i]], 'k|', alpha=0.5)
+        
+        
+        # Improve aesthetics
+        plt.yticks(y_pos, features, fontsize=9)
+        plt.xlabel('Feature Importance (Mean across runs)', fontweight='bold')
+        plt.title('Aggregated Feature Importance Ranking', fontsize=14, fontweight='bold')
+        plt.grid(axis='x', alpha=0.3)
+        
+        # Add a legend explaining the error bars
+        plt.plot([], [], 'k-', label='Min-Max Range')
+        plt.legend(loc='lower right')
+        
+        plt.tight_layout()
+        
+        # Save the figure
+        plt.savefig(os.path.join(output_dir, 'feature_importance_ranking.png'), dpi=300, bbox_inches='tight')
+        print(f"Saved plot to {os.path.join(output_dir, 'feature_importance_ranking.png')}")
+        
+        # Print top 20 features
+        print("\nTop 20 most important features (aggregated across runs):")
+        print("-" * 80)
+        print(f"{'Rank':<5}{'Feature Name':<40}{'Mean Importance':<15}{'Std Dev':<10}{'Min':<10}{'Max':<10}")
+        print("-" * 80)
+        
+        for i, row in result_df.head(20).iterrows():
+            print(f"{i+1:<5}{row['feature_name']:<40}{row['mean_importance']:.6f}      {row['std_importance']:.6f}  {row['min_importance']:.6f}  {row['max_importance']:.6f}")
+        
+        print("-" * 80)
+        
+        return result_df
+
 
 def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, device="cpu"):
     """
@@ -904,3 +1041,15 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
     analyzer.run_full_analysis(observations)
     
     return analyzer
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Aggregate feature importance across runs')
+    parser.add_argument('--log_folder', type=str, required=True,
+                        help='Path to the folder containing training runs')
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help='Directory to save aggregated results')
+    
+    args = parser.parse_args()
+    
+    # Run the aggregation
+    PolicyAnalyzer.aggregate_feature_importance(args.log_folder, args.output_dir)

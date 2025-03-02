@@ -376,12 +376,14 @@ def main():
                       help="Number of samples to collect for analysis")
     parser.add_argument("--show_viewer", action="store_true", default=True,
                       help="Show the Genesis viewer")
+    parser.add_argument("--log_dir", type=str, default="logs",
+                      help="Directory to save logs")
     args = parser.parse_args()
 
     gs.init()
 
-    log_dir = f"logs/{args.exp_name}"
-    env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(open(f"logs/{args.exp_name}/cfgs.pkl", "rb"))
+    log_dir = f"{args.log_dir}/{args.exp_name}"
+    env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(open(f"{args.log_dir}/{args.exp_name}/cfgs.pkl", "rb"))
     reward_cfg["reward_scales"] = {}
 
     # Create environment with show_viewer=True directly
