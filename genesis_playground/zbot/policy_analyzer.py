@@ -95,9 +95,23 @@ class PolicyAnalyzer:
         self, 
         base_observation: torch.Tensor,
         perturbation_scale: float = 0.01,
-        num_samples: int = 10
+        num_samples: int = 21  # Increased for more stable estimates
     ):
-        """Compute sensitivity of policy outputs to input perturbations."""
+        """
+        Compute sensitivity of policy outputs to input perturbations.
+        
+        This uses a deterministic central finite difference method to ensure
+        consistent results across runs with the same inputs.
+        
+        Args:
+            base_observation: Base observation to perturb [batch_size, obs_dim]
+            perturbation_scale: Scale of perturbations relative to feature std
+            num_samples: Number of samples for each feature perturbation (odd number recommended)
+        """
+        # Set a fixed random seed for reproducibility
+        torch.manual_seed(0)
+        np.random.seed(0)
+        
         # Make sure base_observation is 2D [batch_size, obs_dim]
         if base_observation.dim() == 1:
             base_observation = base_observation.unsqueeze(0)
@@ -121,70 +135,58 @@ class PolicyAnalyzer:
             
         # Ensure minimum perturbation size to avoid numerical issues
         min_perturbation = 1e-6
-        perturbation_sizes = torch.maximum(perturbation_sizes, 
-                                          torch.tensor(min_perturbation, device=self.device))
+        perturbation_sizes = torch.clamp(perturbation_sizes, min=min_perturbation)
+        
+        # Print perturbation sizes for debugging
+        print(f"Perturbation scale: {perturbation_scale}")
+        print(f"Min perturbation size: {perturbation_sizes.min().item()}")
+        print(f"Max perturbation size: {perturbation_sizes.max().item()}")
         
         # Initialize sensitivity matrices
         self.sensitivity_matrix = torch.zeros((obs_dim, action_dim), device=self.device)
         self.normalized_sensitivity_matrix = torch.zeros((obs_dim, action_dim), device=self.device)
         
+        # Get baseline action first to ensure consistent reference
+        with torch.no_grad():
+            base_action = self.policy(base_observation).squeeze(0)
+            
+        print(f"Base observation shape: {base_observation.shape}")
+        print(f"Base action shape: {base_action.shape}")
+        
         # Compute sensitivity for each feature
         for i in range(obs_dim):
-            # Create perturbations for this feature
-            perturbations = torch.zeros((num_samples, obs_dim), device=self.device)
-            perturbations[:, i] = torch.linspace(-perturbation_sizes[i], 
-                                                perturbation_sizes[i], 
-                                                num_samples)
+            feature_name = self.obs_labels[i] if i < len(self.obs_labels) else f"Feature_{i}"
+            print(f"Processing feature {i}: {feature_name}")
             
-            # Create perturbed observations
-            perturbed_obs = base_observation.repeat(num_samples, 1) + perturbations
+            # Create evenly spaced perturbations for this feature
+            delta = perturbation_sizes[i]
             
-            # Get actions for perturbed observations
+            # Use central difference method for more accuracy
+            pos_obs = base_observation.clone()
+            pos_obs[0, i] += delta
+            
+            neg_obs = base_observation.clone()
+            neg_obs[0, i] -= delta
+            
+            # Forward pass for both perturbations
             with torch.no_grad():
-                perturbed_actions = self.policy(perturbed_obs)
+                pos_action = self.policy(pos_obs).squeeze(0)
+                neg_action = self.policy(neg_obs).squeeze(0)
             
-            # Use a more robust calculation method for sensitivity
-            if num_samples >= 3:
-                # Use multiple samples for more stability
-                pos_actions = perturbed_actions[num_samples//2+1:]  # Positive perturbations
-                neg_actions = perturbed_actions[:num_samples//2]    # Negative perturbations
-                
-                pos_values = perturbed_obs[num_samples//2+1:, i]
-                neg_values = perturbed_obs[:num_samples//2, i]
-                
-                # Average sensitivity across all pairs of points
-                sensitivity_sum = torch.zeros(action_dim, device=self.device)
-                count = 0
-                
-                for p_idx, p_action in enumerate(pos_actions):
-                    for n_idx, n_action in enumerate(neg_actions):
-                        obs_diff = pos_values[p_idx] - neg_values[n_idx]
-                        
-                        # Avoid division by very small values
-                        if abs(obs_diff.item()) > 1e-10:
-                            action_diff = p_action - n_action
-                            sensitivity_sum += action_diff / obs_diff
-                            count += 1
-                
-                # Compute average, with fallback if count is zero
-                if count > 0:
-                    feature_sensitivity = sensitivity_sum / count
-                else:
-                    feature_sensitivity = torch.zeros(action_dim, device=self.device)
-            else:
-                # Simple two-point calculation
-                action_diff = perturbed_actions[-1] - perturbed_actions[0]
-                feature_diff = perturbed_obs[-1, i] - perturbed_obs[0, i]
-                
-                # Avoid division by very small values
-                if abs(feature_diff.item()) > 1e-10:
-                    feature_sensitivity = action_diff / feature_diff
-                else:
-                    feature_sensitivity = torch.zeros(action_dim, device=self.device)
+            # Central difference formula
+            feature_sensitivity = (pos_action - neg_action) / (2 * delta)
+            
+            # Debug information
+            if i < 3 or i >= obs_dim - 3:  # Show first and last few features
+                print(f"  Delta: {delta.item():.6e}")
+                print(f"  Base value: {base_observation[0, i].item():.6f}")
+                print(f"  Pos value: {pos_obs[0, i].item():.6f}")
+                print(f"  Neg value: {neg_obs[0, i].item():.6f}")
+                print(f"  Sensitivity (first 3): {feature_sensitivity[:3].cpu().numpy()}")
             
             # Replace any NaN values
             if torch.isnan(feature_sensitivity).any():
-                print(f"Warning: NaN detected in sensitivity for feature {i} ({self.obs_labels[i]}). Setting to zero.")
+                print(f"Warning: NaN detected in sensitivity for feature {i} ({feature_name}). Setting to zero.")
                 feature_sensitivity = torch.where(torch.isnan(feature_sensitivity), 
                                                 torch.zeros_like(feature_sensitivity), 
                                                 feature_sensitivity)
@@ -193,7 +195,7 @@ class PolicyAnalyzer:
             self.sensitivity_matrix[i, :] = feature_sensitivity
         
         # Normalize sensitivity by feature ranges
-        if self.obs_stats['std'] is not None:
+        if self.obs_stats['std'] is not None and self.action_stats['max'] is not None:
             for i in range(obs_dim):
                 # Get feature range (using statistics)
                 feature_std = self.obs_stats['std'][i].clamp(min=1e-6)
@@ -220,7 +222,64 @@ class PolicyAnalyzer:
         if torch.isnan(self.normalized_sensitivity_matrix).any():
             print("Warning: NaN values still present in sensitivity matrix. Replacing with zeros.")
             self.normalized_sensitivity_matrix = torch.nan_to_num(self.normalized_sensitivity_matrix, nan=0.0)
-                
+        
+        # Save sensitivity data for reproducibility
+        self.save_sensitivity_data()
+
+    def compute_sensitivity_multi_point(self, base_observation, perturbation_scale=0.01, num_points=5):
+        """Compute sensitivity using multiple points for better accuracy."""
+        # For each feature
+        for i in range(obs_dim):
+            # Create multiple evenly-spaced perturbations
+            perturbations = torch.linspace(-perturbation_scale, perturbation_scale, num_points)
+            
+            # Get actions for all perturbations
+            actions = []
+            for p in perturbations:
+                perturbed_obs = base_observation.clone()
+                perturbed_obs[0, i] += p
+                with torch.no_grad():
+                    actions.append(self.policy(perturbed_obs))
+            
+            # Use linear regression to find the slope (sensitivity)
+            x = perturbations.view(-1, 1).numpy()
+            y = torch.stack(actions).squeeze(1).cpu().numpy()
+            
+            # For each action dimension
+            for j in range(action_dim):
+                slope, _, _, _ = np.linalg.lstsq(x, y[:, j], rcond=None)
+                self.sensitivity_matrix[i, j] = torch.tensor(slope[0], device=self.device)
+
+    def save_sensitivity_data(self):
+        """Save raw sensitivity data for later analysis or verification."""
+        os.makedirs(self.save_dir, exist_ok=True)
+        
+        # Save sensitivity matrices
+        if not hasattr(self, 'sensitivity_matrix') or self.sensitivity_matrix is None:
+            return
+            
+        # Convert to numpy for easier saving/loading
+        raw_sensitivity = self.sensitivity_matrix.cpu().numpy()
+        norm_sensitivity = self.normalized_sensitivity_matrix.cpu().numpy()
+        
+        # Save numpy arrays
+        np.save(f"{self.save_dir}/raw_sensitivity.npy", raw_sensitivity)
+        np.save(f"{self.save_dir}/normalized_sensitivity.npy", norm_sensitivity)
+        
+        # Also save a text version of feature importances
+        importances = np.linalg.norm(norm_sensitivity, axis=1)
+        sorted_indices = np.argsort(-importances)
+        
+        with open(f"{self.save_dir}/feature_importances.txt", "w") as f:
+            f.write("Feature Importance Ranking\n")
+            f.write("=========================\n\n")
+            f.write("Rank | Feature | Importance\n")
+            f.write("--------------------------\n")
+            
+            for rank, idx in enumerate(sorted_indices):
+                name = self.obs_labels[idx] if idx < len(self.obs_labels) else f"Feature_{idx}"
+                f.write(f"{rank+1:4d} | {name:20s} | {importances[idx]:.6f}\n")
+
     def plot_feature_statistics(self):
         """Plot statistics for each feature."""
         if self.obs_stats['mean'] is None:
@@ -361,7 +420,7 @@ class PolicyAnalyzer:
         action_sensitivity = np.linalg.norm(abs_sensitivity, axis=0)
         total_actions = len(action_sensitivity)  # Store total number of actions
         
-        if top_k_actions is not None:
+        if (top_k_actions is not None):
             top_k_actions = min(top_k_actions, total_actions)  # Ensure we don't exceed number of actions
             action_indices = np.argsort(action_sensitivity)[::-1][:top_k_actions]
             action_count_text = f"Top {top_k_actions} of {total_actions} Actions"
@@ -593,18 +652,16 @@ class PolicyAnalyzer:
         observations: torch.Tensor,
         base_observation: Optional[torch.Tensor] = None,
         perturbation_scale: float = 0.01,
-        top_k: int = 20
+        top_k: int = 20,
+        seed: int = 0  # Add fixed seed for reproducibility
     ):
-        """
-        Run full feature importance analysis.
+        """Run full feature importance analysis."""
+        # Set random seeds for reproducibility
+        torch.manual_seed(seed)
+        np.random.seed(seed)
         
-        Args:
-            observations: Tensor of observations [num_samples, obs_dim]
-            base_observation: Observation to use for sensitivity analysis (uses mean if None)
-            perturbation_scale: Scale of perturbations
-            top_k: Number of top features to show
-        """
         print("Running policy feature analysis...")
+        print(f"Using random seed: {seed}")
         
         # Collect statistics
         print("Collecting statistics...")
@@ -612,8 +669,17 @@ class PolicyAnalyzer:
         
         # Use mean observation if base_observation not provided
         if base_observation is None:
-            base_observation = self.obs_stats['mean'].unsqueeze(0)  # Add batch dimension
+            # Use the mean observation for more stable results
+            base_observation = self.obs_stats['mean'].unsqueeze(0)
+            print("Using mean observation as base")
         
+        # Print statistics about the base observation
+        print(f"Base observation stats:")
+        print(f"  Shape: {base_observation.shape}")
+        print(f"  Mean: {base_observation.mean().item():.4f}")
+        print(f"  Min: {base_observation.min().item():.4f}")
+        print(f"  Max: {base_observation.max().item():.4f}")
+            
         # Compute sensitivity
         print("Computing sensitivity...")
         self.compute_sensitivity(base_observation, perturbation_scale)
@@ -894,6 +960,254 @@ class PolicyAnalyzer:
         
         return result_df
 
+    def robust_sensitivity_analysis(self, observations, num_base_points=10, perturbation_scale=0.01):
+        """Compute sensitivity across multiple base observations for robustness."""
+        # Randomly select base points
+        indices = torch.randperm(len(observations))[:num_base_points]
+        base_points = observations[indices]
+        
+        # Collect statistics first
+        print("Collecting statistics for robust sensitivity analysis...")
+        self.collect_statistics(observations)
+        
+        # Initialize aggregate sensitivity matrices
+        obs_dim = observations.shape[1]
+        
+        # Get action dimension by doing a forward pass
+        with torch.no_grad():
+            test_action = self.policy(observations[0:1])
+        action_dim = test_action.shape[1]
+        
+        # Initialize matrices with the right dimensions
+        agg_sensitivity = torch.zeros((obs_dim, action_dim), device=self.device)
+        self.sensitivity_matrix = torch.zeros((obs_dim, action_dim), device=self.device)
+        self.normalized_sensitivity_matrix = torch.zeros((obs_dim, action_dim), device=self.device)
+        
+        print(f"Computing sensitivity for {num_base_points} diverse base points...")
+        
+        # Compute sensitivity for each base point
+        for i, base_obs in enumerate(base_points):
+            print(f"Computing sensitivity for base point {i+1}/{num_base_points}")
+            
+            # Compute sensitivity for this base point
+            self.compute_sensitivity(base_obs.unsqueeze(0), perturbation_scale)
+            
+            # Add to aggregate
+            agg_sensitivity += self.normalized_sensitivity_matrix
+            
+            # Save this base point's sensitivity with a unique name
+            np.save(f"{self.save_dir}/sensitivity_base{i+1}.npy", 
+                   self.normalized_sensitivity_matrix.cpu().numpy())
+        
+        # Average the sensitivities
+        self.normalized_sensitivity_matrix = agg_sensitivity / num_base_points
+        print("Completed robust sensitivity analysis across multiple base points")
+        
+        # Save the final aggregated sensitivity
+        np.save(f"{self.save_dir}/sensitivity_aggregated.npy", 
+               self.normalized_sensitivity_matrix.cpu().numpy())
+
+    def phase_aware_sensitivity_analysis(self, observations, env, num_phases=8, perturbation_scale=0.01, phase_indices=None):
+        """
+        Analyze feature sensitivity across different phases of the gait cycle.
+        
+        Args:
+            observations: Collected observations tensor
+            env: Environment instance for gait phase detection
+            num_phases: Number of phases to divide the gait cycle into (if detecting phases)
+            perturbation_scale: Scale of perturbations for sensitivity analysis
+            phase_indices: Pre-computed phase indices (dictionary mapping phase number to observation indices)
+        """
+        # First collect overall statistics
+        self.collect_statistics(observations)
+        
+        # Detect gait phases if not provided
+        if phase_indices is None:
+            print(f"Detecting {num_phases} gait phases...")
+            phase_indices = detect_gait_phases(observations, env, num_phases)
+        else:
+            # Use provided phases, but update num_phases if needed
+            num_phases = max(phase_indices.keys()) + 1
+            print(f"Using pre-computed gait phases ({num_phases} phases)")
+        
+        # Initialize storage for phase-specific sensitivities
+        phase_sensitivities = {}
+        
+        # Create a subplot grid for phase-specific importance plots
+        fig, axes = plt.subplots(2, 4, figsize=(20, 10), sharey=True) if num_phases == 8 else plt.subplots(
+            int(np.ceil(num_phases/4)), 4, figsize=(20, 5*np.ceil(num_phases/4)), sharey=True)
+        axes = axes.flatten()
+        
+        # Analyze each phase separately
+        for phase in range(num_phases):
+            idx = phase_indices[phase]
+            if len(idx) < 5:  # Skip phases with too few samples
+                print(f"Warning: Phase {phase} has only {len(idx)} samples. Skipping.")
+                continue
+                
+            print(f"Analyzing phase {phase}/{num_phases} with {len(idx)} samples")
+            
+            # Get representative observation for this phase
+            phase_obs = observations[idx]
+            base_obs = phase_obs.mean(dim=0, keepdim=True)
+            
+            # Get action dimension by doing a forward pass
+            with torch.no_grad():
+                test_action = self.policy(base_obs)
+            action_dim = test_action.shape[1]
+            
+            # Initialize sensitivity matrices for this phase
+            obs_dim = observations.shape[1]
+            sensitivity = torch.zeros((obs_dim, action_dim), device=self.device)
+            
+            # Compute sensitivity using central difference method
+            for i in range(obs_dim):
+                delta = perturbation_scale * self.obs_stats['std'][i].clamp(min=1e-6)
+                
+                # Create perturbed observations
+                pos_obs = base_obs.clone()
+                pos_obs[0, i] += delta
+                
+                neg_obs = base_obs.clone()
+                neg_obs[0, i] -= delta
+                
+                # Get actions
+                with torch.no_grad():
+                    pos_action = self.policy(pos_obs).squeeze(0)
+                    neg_action = self.policy(neg_obs).squeeze(0)
+                
+                # Compute sensitivity
+                feature_sensitivity = (pos_action - neg_action) / (2 * delta)
+                sensitivity[i, :] = feature_sensitivity
+            
+            # Store this phase's sensitivity
+            phase_sensitivities[phase] = sensitivity
+            
+            # Plot feature importance for this phase
+            feature_importance = torch.norm(sensitivity, dim=1).cpu().numpy()
+            sorted_indices = np.argsort(-feature_importance)[:20]  # Top 20 features
+            
+            # Plot in the appropriate subplot
+            ax = axes[phase]
+            labels = [self.obs_labels[i] for i in sorted_indices]
+            values = feature_importance[sorted_indices]
+            
+            ax.barh(range(len(labels)), values, align='center', color='teal')
+            ax.set_yticks(range(len(labels)))
+            ax.set_yticklabels(labels, fontsize=8)
+            ax.set_title(f"Phase {phase}", fontweight='bold')
+            if phase % 4 == 0:
+                ax.set_ylabel("Features")
+            if phase >= num_phases-4:
+                ax.set_xlabel("Importance")
+        
+        # Hide any unused subplots
+        for i in range(num_phases, len(axes)):
+            axes[i].set_visible(False)
+            
+        plt.tight_layout()
+        plt.savefig(f"{self.save_dir}/phase_feature_importance.png", dpi=300, bbox_inches='tight')
+        plt.close()
+        
+        # Create a heatmap showing feature importance across phases
+        self._plot_phase_importance_heatmap(phase_sensitivities, num_phases)
+        
+        return phase_sensitivities
+
+    def _plot_phase_importance_heatmap(self, phase_sensitivities, num_phases):
+        """Plot heatmap of feature importance across different gait phases."""
+        if not phase_sensitivities:
+            return
+            
+        # Get feature dimension from first phase
+        first_phase = list(phase_sensitivities.keys())[0]
+        obs_dim = phase_sensitivities[first_phase].shape[0]
+        
+        # Prepare data for heatmap (features x phases)
+        heatmap_data = np.zeros((obs_dim, num_phases))
+        
+        # Calculate importance for each feature in each phase
+        for phase in range(num_phases):
+            if phase in phase_sensitivities:
+                # Calculate importance as L2 norm across actions
+                importance = torch.norm(phase_sensitivities[phase], dim=1).cpu().numpy()
+                heatmap_data[:, phase] = importance
+        
+        # Sort features by overall importance
+        overall_importance = heatmap_data.sum(axis=1)
+        sorted_indices = np.argsort(-overall_importance)
+        
+        # Select top 25 features for better visualization
+        top_indices = sorted_indices[:25]
+        top_data = heatmap_data[top_indices, :]
+        top_labels = [self.obs_labels[i] for i in top_indices]
+        
+        # Create heatmap
+        plt.figure(figsize=(12, 10))
+        if HAS_SEABORN:
+            sns.heatmap(top_data, cmap='viridis', 
+                       xticklabels=range(num_phases),
+                       yticklabels=top_labels,
+                       cbar_kws={'label': 'Feature Importance'})
+        else:
+            plt.imshow(top_data, cmap='viridis', aspect='auto')
+            plt.colorbar(label='Feature Importance')
+            plt.yticks(np.arange(len(top_labels)), top_labels)
+            plt.xticks(np.arange(num_phases), range(num_phases))
+        
+        plt.title("Feature Importance Across Gait Phases", fontsize=14, fontweight='bold')
+        plt.xlabel("Gait Phase", fontweight='bold')
+        plt.ylabel("Feature", fontweight='bold')
+        plt.tight_layout()
+        
+        plt.savefig(f"{self.save_dir}/phase_importance_heatmap.png", dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def detect_gait_phases_from_contacts(self, observations, foot_contacts, num_phases=8):
+        """More accurate gait phase detection using foot contact information."""
+        # Assuming foot_contacts is a tensor [num_samples, num_feet]
+        num_feet = foot_contacts.shape[1]
+        
+        # Detect gait cycles using foot contact patterns
+        # For a quadruped, typically one full gait cycle happens when all feet complete 
+        # their stance-swing-stance pattern
+        
+        # Example for typical quadruped gaits:
+        # 1. Calculate which foot is the reference limb (e.g., front right)
+        ref_limb = 0  # Front right foot
+        
+        # 2. Detect touchdown events (contact transitions from 0 to 1)
+        contact_changes = foot_contacts[1:, ref_limb] - foot_contacts[:-1, ref_limb]
+        touchdown_indices = torch.where(contact_changes == 1)[0] + 1
+        
+        # 3. Each pair of consecutive touchdowns defines one stride
+        if len(touchdown_indices) < 2:
+            print("Warning: Not enough gait cycles detected. Falling back to time-based phases.")
+            # Fall back to time-based phases
+            return detect_gait_phases(observations, None, num_phases)
+        
+        # 4. Identify phases within each stride
+        phases = []
+        for i in range(len(observations)):
+            # Find which stride this observation belongs to
+            stride_idx = np.searchsorted(touchdown_indices, i) - 1
+            if stride_idx >= 0 and stride_idx < len(touchdown_indices) - 1:
+                stride_start = touchdown_indices[stride_idx]
+                stride_end = touchdown_indices[stride_idx + 1]
+                # Calculate phase within this stride (0 to num_phases-1)
+                stride_progress = (i - stride_start) / (stride_end - stride_start)
+                phase = int(stride_progress * num_phases) % num_phases
+            else:
+                # For observations before first touchdown or after last one
+                phase = 0
+            phases.append(phase)
+        
+        # Group observation indices by phase
+        phase_indices = {}
+        for phase in range(num_phases):
+            phase_indices[phase] = np.where(np.array(phases) == phase)[0]
+        
+        return phase_indices
 
 def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, device="cpu"):
     """
@@ -991,7 +1305,17 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
     # Use fixed commands for consistent evaluation
     fixed_cmd = {"x": 1.0, "y": 0.0, "yaw": 0.0}
     
+    # Collect observations using varying commands to get diverse states
+    commands = [
+        {"x": 1.0, "y": 0.0, "yaw": 0.0},
+        {"x": 0.0, "y": 1.0, "yaw": 0.0},
+        {"x": 0.7, "y": 0.7, "yaw": 0.0}
+    ]
+
+    # Cycle through commands while collecting observations
     for i in range(num_samples):
+        cmd = commands[i % len(commands)]
+        # Apply command and collect observation
         # Apply fixed command to observation
         obs_copy = obs.clone()
         
@@ -1041,6 +1365,81 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
     analyzer.run_full_analysis(observations)
     
     return analyzer
+
+def analyze_with_command_variation(env, policy, commands=None):
+    """Analyze feature importance across different command scenarios."""
+    if commands is None:
+        commands = [
+            {"x": 1.0, "y": 0.0, "yaw": 0.0},  # Forward
+            {"x": 0.0, "y": 1.0, "yaw": 0.0},  # Lateral
+            {"x": 0.0, "y": 0.0, "yaw": 1.0},  # Turn
+            {"x": 0.7, "y": 0.7, "yaw": 0.0}   # Diagonal
+        ]
+    
+    # Run analysis for each command
+    results = {}
+    for cmd_name, cmd in commands.items():
+        print(f"Analyzing command scenario: {cmd_name}")
+        analyzer = analyze_policy(env, policy, cmd=cmd)
+        results[cmd_name] = analyzer
+    
+    # Aggregate results
+    aggregate_importance = np.zeros(len(results[list(results.keys())[0]].obs_labels))
+    for cmd_name, analyzer in results.items():
+        imp = np.linalg.norm(analyzer.normalized_sensitivity_matrix.cpu().numpy(), axis=1)
+        aggregate_importance += imp
+    
+    # Average importance across command scenarios
+    aggregate_importance /= len(results)
+    
+    # Plot aggregated results
+    # ...
+
+def detect_gait_phases_from_contacts(observations, foot_contacts, num_phases=8):
+    """More accurate gait phase detection using foot contact information."""
+    # Assuming foot_contacts is a tensor [num_samples, num_feet]
+    num_feet = foot_contacts.shape[1]
+    
+    # Detect gait cycles using foot contact patterns
+    # For a quadruped, typically one full gait cycle happens when all feet complete 
+    # their stance-swing-stance pattern
+    
+    # Example for typical quadruped gaits:
+    # 1. Calculate which foot is the reference limb (e.g., front right)
+    ref_limb = 0  # Front right foot
+    
+    # 2. Detect touchdown events (contact transitions from 0 to 1)
+    contact_changes = foot_contacts[1:, ref_limb] - foot_contacts[:-1, ref_limb]
+    touchdown_indices = torch.where(contact_changes == 1)[0] + 1
+    
+    # 3. Each pair of consecutive touchdowns defines one stride
+    if len(touchdown_indices) < 2:
+        print("Warning: Not enough gait cycles detected. Falling back to time-based phases.")
+        # Fall back to time-based phases
+        return detect_gait_phases(observations, None, num_phases)
+    
+    # 4. Identify phases within each stride
+    phases = []
+    for i in range(len(observations)):
+        # Find which stride this observation belongs to
+        stride_idx = np.searchsorted(touchdown_indices, i) - 1
+        if stride_idx >= 0 and stride_idx < len(touchdown_indices) - 1:
+            stride_start = touchdown_indices[stride_idx]
+            stride_end = touchdown_indices[stride_idx + 1]
+            # Calculate phase within this stride (0 to num_phases-1)
+            stride_progress = (i - stride_start) / (stride_end - stride_start)
+            phase = int(stride_progress * num_phases) % num_phases
+        else:
+            # For observations before first touchdown or after last one
+            phase = 0
+        phases.append(phase)
+    
+    # Group observation indices by phase
+    phase_indices = {}
+    for phase in range(num_phases):
+        phase_indices[phase] = np.where(np.array(phases) == phase)[0]
+    
+    return phase_indices
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Aggregate feature importance across runs')

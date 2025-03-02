@@ -8,6 +8,7 @@ import torch
 import pygame 
 from zbot_env import ZbotEnv
 from rsl_rl.runners import OnPolicyRunner
+from policy_analyzer import PolicyAnalyzer  # Add this import at the module level
 
 import genesis as gs
 
@@ -168,74 +169,173 @@ def run_sim(env, policy_fn, obs, use_keyboard=False, base_policy=None, screen=No
     except Exception as e:
         print(f"Simulation error: {e}")
 
-def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, device="cpu"):
+def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, device="cpu", seed=0):
     """
     Analyze the importance of features in the policy.
-    
-    Args:
-        env: The environment
-        runner: The policy runner
-        save_dir: Directory to save analysis results
-        num_samples: Number of samples to collect
-        device: Device to run on
-    
-    Returns:
-        PolicyAnalyzer: The analyzer with results
     """
-    # Import the policy analyzer
-    from policy_analyzer import PolicyAnalyzer
+    # Set seeds for reproducibility
+    torch.manual_seed(seed)
+    np.random.seed(seed)
     
     # Get policy from runner
     policy = runner.get_inference_policy(device=device)
     
     # Get observation and action labels
     obs_labels = env.get_observation_labels()
-    
-    # Action labels - try to get them from the environment or create generic ones
+
     try:
         action_labels = env.get_action_labels()
     except AttributeError:
-        # Create generic action labels if not available from the environment
         action_labels = [f"Action_{i}" for i in range(env.num_actions)]
-    
+
     # Create analyzer
     analyzer = PolicyAnalyzer(
         policy=policy,
         obs_labels=obs_labels,
         action_labels=action_labels,
         device=device,
-        save_dir=save_dir
+        save_dir=f"{args.log_dir}/{args.exp_name}/feature_analysis"
     )
+
+    # Collect observations using varying commands
+    print(f"Collecting samples using multiple commands...")
+    observations = collect_observations_with_varying_commands(
+        env, policy, num_samples=args.analysis_samples
+    )
+
+    # Use robust analysis instead of standard analysis
+    analyzer.robust_sensitivity_analysis(
+        observations, 
+        num_base_points=5,  # Sample 5 different base points for more robust results
+        perturbation_scale=0.01
+    )
+
+    # Run the rest of the analysis
+    analyzer.run_full_analysis(observations)
     
-    # Collect samples
-    print(f"Collecting {num_samples} samples for analysis...")
+    return analyzer
+
+def collect_observations_with_varying_commands(env, policy, num_samples=1000, seed=None, device="cpu"):
+    """Collect observations using varying commands for diverse state coverage."""
+    # Set seed if provided
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+    
+    # Define a variety of commands to try
+    commands = [
+        {"x": 1.0, "y": 0.0, "yaw": 0.0},   # Forward
+        {"x": 0.0, "y": 1.0, "yaw": 0.0},   # Lateral
+        {"x": 0.0, "y": 0.0, "yaw": 1.0},   # Turn
+        {"x": 0.7, "y": 0.7, "yaw": 0.0},   # Diagonal
+        {"x": -0.7, "y": 0.0, "yaw": 0.0},  # Backward
+    ]
+    
+    print(f"Collecting {num_samples} samples with {len(commands)} different commands...")
     observations = []
     
     # Reset environment
     obs, _ = env.get_observations()
     
     for i in range(num_samples):
-        # Apply fixed command to observation
+        # Cycle through different commands
+        cmd = commands[i % len(commands)]
+        
+        # Apply command to observation
         obs_copy = obs.clone()
+        
+        # Apply the selected command
+        obs_copy[:, 6] = cmd["x"]
+        obs_copy[:, 7] = cmd["y"]
+        obs_copy[:, 8] = cmd["yaw"]
         
         # Get action
         with torch.no_grad():
             action = policy(obs_copy)
         
-        # Step environment - handling different return formats
+        # Step environment
         result = env.step(action)
         
         # Handle different return formats
-        if len(result) == 4:  # obs, rew, done, info
+        if len(result) == 4:
             obs, _, _, _ = result
-        elif len(result) == 5:  # obs, rew, done, info, extras
+        elif len(result) == 5:
             obs, _, _, _, _ = result
         else:
-            # Fallback - assume first element is observation
             obs = result[0]
         
         # Store observation
-        observations.append(obs_copy[0].clone())  # Store modified observation
+        observations.append(obs_copy[0].clone())
+        
+        # Progress
+        if (i+1) % (num_samples // 10) == 0:
+            print(f"Collected {i+1}/{num_samples} samples")
+    
+    # Stack observations and move to the specified device
+    return torch.stack(observations).to(device)
+
+def collect_gait_data(env, policy, num_samples=1000, seed=None, device="cpu"):
+    """
+    Collect observations and foot contacts for gait phase analysis.
+    
+    Args:
+        env: Environment instance
+        policy: Policy function
+        num_samples: Number of samples to collect
+        seed: Random seed for reproducibility
+        device: Device to run on
+    
+    Returns:
+        observations: Tensor of observations
+        foot_contacts: Tensor of foot contact information (if available)
+    """
+    # Set seed if provided
+    if seed is not None:
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+    
+    print(f"Collecting {num_samples} samples for gait analysis...")
+    observations = []
+    foot_contacts = []
+    has_foot_contacts = hasattr(env, "get_foot_contacts")
+    
+    # Reset environment
+    obs, _ = env.get_observations()
+    
+    # Use consistent command for gait analysis
+    fixed_cmd = {"x": 1.0, "y": 0.0, "yaw": 0.0}  # Forward motion for consistent gait
+    
+    for i in range(num_samples):
+        # Apply command to observation
+        obs_copy = obs.clone()
+        
+        # Apply command (assuming standard ZBot indices)
+        obs_copy[:, 6] = fixed_cmd["x"]
+        obs_copy[:, 7] = fixed_cmd["y"]
+        obs_copy[:, 8] = fixed_cmd["yaw"]
+        
+        # Get action
+        with torch.no_grad():
+            action = policy(obs_copy)
+        
+        # Collect foot contact data if available
+        if has_foot_contacts:
+            contacts = env.get_foot_contacts()
+            foot_contacts.append(contacts)
+        
+        # Step environment
+        result = env.step(action)
+        
+        # Handle different return formats
+        if len(result) == 4:
+            obs, _, _, _ = result
+        elif len(result) == 5:
+            obs, _, _, _, _ = result
+        else:
+            obs = result[0]
+        
+        # Store observation
+        observations.append(obs_copy[0].clone())
         
         # Progress
         if (i+1) % (num_samples // 10) == 0:
@@ -244,10 +344,14 @@ def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, d
     # Stack observations
     observations = torch.stack(observations).to(device)
     
-    # Run analysis
-    analyzer.run_full_analysis(observations)
-    
-    return analyzer
+    # Stack foot contacts if available
+    if foot_contacts:
+        foot_contacts = torch.stack(foot_contacts).to(device)
+        print(f"Collected foot contacts with shape: {foot_contacts.shape}")
+        return observations, foot_contacts
+    else:
+        print("No foot contact information available from environment")
+        return observations, None
 
 def set_camera_view(viewer, position=(1.0, -1.0, 1.0), lookat=(0.0, 0.0, 0.3), fov=60):
     """Set custom camera position for better robot visibility."""
@@ -365,6 +469,36 @@ def camera_controls_callback(viewer):
         )
         y_pos += 20
 
+def detect_gait_phases(observations, env, num_phases=8):
+    """
+    Detect gait phases from observations using time-based estimation.
+    
+    Args:
+        observations: Tensor of observations
+        env: Environment instance (not used in time-based estimation)
+        num_phases: Number of phases to identify
+        
+    Returns:
+        phase_indices: Dictionary mapping phase number to observation indices
+    """
+    # Estimate typical stride duration (in number of steps)
+    # For quadrupeds at normal speed, ~20-30 steps per stride is common
+    estimated_stride_steps = 20
+    
+    # Create phases based on time/step count
+    phases = np.linspace(0, 2*np.pi, estimated_stride_steps, endpoint=False)
+    phases = np.tile(phases, len(observations)//estimated_stride_steps + 1)[:len(observations)]
+    
+    # Convert to discrete phase buckets
+    discrete_phases = (phases/(2*np.pi) * num_phases).astype(int) % num_phases
+    
+    # Group observation indices by phase
+    phase_indices = {}
+    for phase in range(num_phases):
+        phase_indices[phase] = np.where(discrete_phases == phase)[0]
+    
+    return phase_indices
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="zbot-walking")
@@ -374,6 +508,11 @@ def main():
     parser.add_argument("--analyze", action="store_true", help="Perform feature importance analysis")
     parser.add_argument("--analysis_samples", type=int, default=1000, 
                       help="Number of samples to collect for analysis")
+    parser.add_argument("--analysis_type", type=str, default="standard", 
+                      choices=["standard", "robust", "command_variation", "phase_aware"],
+                      help="Type of feature analysis to perform")
+    parser.add_argument("--analysis_seed", type=int, default=None,
+                      help="Random seed for feature analysis (use None for random results)")
     parser.add_argument("--show_viewer", action="store_true", default=True,
                       help="Show the Genesis viewer")
     parser.add_argument("--log_dir", type=str, default="logs",
@@ -409,16 +548,91 @@ def main():
     
     # If analyze flag is set, perform feature importance analysis
     if args.analyze:
-        # Run analysis
-        analysis_dir = f"logs/{args.exp_name}/feature_analysis"
-        analyzer = analyze_policy(
-            env, 
-            runner, 
-            save_dir=analysis_dir,
-            num_samples=args.analysis_samples,
-            device=args.device
-        )
-        print(f"Feature analysis complete. Results saved to {analysis_dir}/")
+        save_dir = f"{args.log_dir}/{args.exp_name}/feature_analysis"
+        if args.analysis_seed is not None:
+            save_dir += f"_seed{args.analysis_seed}"
+        
+        if args.analysis_type == "standard":
+            print("Running standard feature analysis...")
+            analyzer = analyze_policy(
+                env, 
+                runner, 
+                save_dir=save_dir,
+                num_samples=args.analysis_samples,
+                device=args.device,
+                seed=args.analysis_seed
+            )
+        
+        elif args.analysis_type == "robust":
+            print("Running robust feature analysis across multiple base points...")
+            policy = runner.get_inference_policy(device=args.device)
+            analyzer = PolicyAnalyzer(
+                policy=policy,
+                obs_labels=env.get_observation_labels(),
+                action_labels=env.get_action_labels() if hasattr(env, "get_action_labels") else None,
+                device=args.device,
+                save_dir=save_dir
+            )
+            
+            observations = collect_observations_with_varying_commands(
+                env, 
+                policy, 
+                num_samples=args.analysis_samples, 
+                seed=args.analysis_seed,
+                device=args.device  # Pass the device explicitly
+            )
+            
+            analyzer.robust_sensitivity_analysis(
+                observations, 
+                num_base_points=5, 
+                perturbation_scale=0.01
+            )
+            
+            analyzer.run_full_analysis(observations)
+        
+        elif args.analysis_type == "command_variation":
+            print("Running feature analysis with systematic command variation...")
+            # Implementation for command variation analysis
+            # ...
+        
+        elif args.analysis_type == "phase_aware":
+            print("Running phase-aware feature analysis across gait cycles...")
+            policy = runner.get_inference_policy(device=args.device)
+            analyzer = PolicyAnalyzer(
+                policy=policy,
+                obs_labels=env.get_observation_labels(),
+                action_labels=env.get_action_labels() if hasattr(env, "get_action_labels") else None,
+                device=args.device,
+                save_dir=save_dir
+            )
+            
+            # Collect observations and foot contacts
+            print("Collecting gait data for phase-aware analysis...")
+            observations, foot_contacts = collect_gait_data(
+                env, 
+                policy, 
+                num_samples=args.analysis_samples * 2,  # Collect more samples for gait analysis
+                seed=args.analysis_seed,
+                device=args.device
+            )
+            
+            # Run phase-aware analysis
+            if foot_contacts is not None:
+                print("Using foot contacts for accurate gait phase detection")
+                # Detect phases using foot contact information
+                phase_indices = analyzer.detect_gait_phases_from_contacts(observations, foot_contacts)
+            else:
+                # Fall back to time-based phase detection
+                print("Falling back to time-based gait phase detection")
+                phase_indices = detect_gait_phases(observations, env)
+            
+            # Run the analysis with the detected phases
+            analyzer.phase_aware_sensitivity_analysis(observations, env, phase_indices=phase_indices)
+            
+            # Also run standard analysis for comparison
+            analyzer.run_full_analysis(observations)
+        
+        print(f"Feature analysis complete. Results saved to {save_dir}/")
         
         # Continue with normal evaluation or exit
         if not args.use_keyboard and not args.show_viewer:
