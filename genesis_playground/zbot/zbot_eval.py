@@ -469,6 +469,65 @@ def camera_controls_callback(viewer):
         )
         y_pos += 20
 
+# Add this new function to collect observations with a single fixed command:
+def collect_observations_with_fixed_command(env, policy, command=None, num_samples=1000, seed=None, device="cpu"):
+    """Collect observations using a single fixed command for proper robust analysis."""
+    # Set seed if provided
+    if seed is not None:
+        # Ensure seed is an integer
+        if isinstance(seed, str):
+            try:
+                seed = int(seed)
+            except ValueError:
+                seed = int(seed.split(',')[0])  # Take first value if it's a comma-separated list
+        
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+    
+    # Define default command if none provided
+    if command is None:
+        command = {"x": 1.0, "y": 0.0, "yaw": 0.0}  # Standard forward motion
+    
+    print(f"Collecting {num_samples} samples with fixed command: x={command['x']}, y={command['y']}, yaw={command['yaw']}...")
+    observations = []
+    
+    # Reset environment
+    obs, _ = env.get_observations()
+    
+    for i in range(num_samples):
+        # Apply the fixed command to observation
+        obs_copy = obs.clone()
+        
+        # Apply command
+        obs_copy[:, 6] = command["x"]
+        obs_copy[:, 7] = command["y"]
+        obs_copy[:, 8] = command["yaw"]
+        
+        # Get action
+        with torch.no_grad():
+            action = policy(obs_copy)
+        
+        # Step environment
+        result = env.step(action)
+        
+        # Handle different return formats
+        if len(result) == 4:
+            obs, _, _, _ = result
+        elif len(result) == 5:
+            obs, _, _, _, _ = result
+        else:
+            obs = result[0]
+        
+        # Store observation
+        observations.append(obs_copy[0].clone())
+        
+        # Progress
+        if (i+1) % (num_samples // 10) == 0:
+            print(f"Collected {i+1}/{num_samples} samples")
+    
+    # Stack observations and move to specified device
+    return torch.stack(observations).to(device)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="zbot-walking")
@@ -478,7 +537,7 @@ def main():
     parser.add_argument("--analyze", action="store_true", help="Perform feature importance analysis")
     parser.add_argument("--analysis_samples", type=int, default=1000, 
                       help="Number of samples to collect for analysis")
-    parser.add_argument("--analysis_type", type=str, default="standard", 
+    parser.add_argument("--analysis_type", type=str, default="robust", 
                       choices=["standard", "robust", "command_variation", "phase_aware"],
                       help="Type of feature analysis to perform")
     parser.add_argument("--analysis_seeds", type=str, default="0",
@@ -551,6 +610,8 @@ def main():
         
         elif args.analysis_type == "robust":
             print("Running robust feature analysis across multiple base points...")
+            seed_value = int(seeds[0])  # Just use the first seed for robust analysis
+            
             policy = runner.get_inference_policy(device=args.device)
             analyzer = PolicyAnalyzer(
                 policy=policy,
@@ -560,14 +621,18 @@ def main():
                 save_dir=save_dir
             )
             
-            observations = collect_observations_with_varying_commands(
+            # Use FIXED command collection instead of varying commands
+            observations = collect_observations_with_fixed_command(
                 env, 
                 policy, 
+                command={"x": 1.0, "y": 0.0, "yaw": 0.0},  # Fixed forward command 
                 num_samples=args.analysis_samples, 
-                seed=args.analysis_seed,
-                device=args.device  # Pass the device explicitly
+                seed=seed_value,
+                device=args.device
             )
             
+            # The robust_sensitivity_analysis already samples multiple base points
+            # from these observations, so we don't need to vary commands
             analyzer.robust_sensitivity_analysis(
                 observations, 
                 num_base_points=5, 
