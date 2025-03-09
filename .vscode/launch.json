@@ -62,7 +62,12 @@
             "request": "launch",
             "program": "genesis_playground/zbot/zbot_tdmpc2_train.py",
             "console": "integratedTerminal",
-            "args": []
+            "args": [
+                "-e", "zbot-tdmpc2", 
+                "--num_envs", "1",
+                "--device", "mps",
+                "--use_wandb", "True"
+            ]
         },
     ]
 }

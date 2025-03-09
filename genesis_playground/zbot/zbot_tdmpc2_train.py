@@ -121,7 +121,7 @@ def get_train_cfg(exp_name, max_iterations, device="mps"):
         "episode_length": 1000,  # Will be overridden
     }
 
-    return DotDict(train_cfg_dict)
+    return train_cfg_dict
 
 
 def get_env_cfg():
@@ -233,62 +233,6 @@ class WandbOnPolicyRunner(OnlineTrainer):
         }
         wandb.log(metrics)
 
-class ZbotTDMPC2Wrapper:
-    def __init__(self, zbot_env):
-        self.env = zbot_env
-        self.observation_space = self._get_observation_space()
-        self.action_space = self._get_action_space()
-        self._current_obs = None
-        
-    def _get_observation_space(self):
-        # Create a gym-like observation space
-        import gym
-        import numpy as np
-        return gym.spaces.Box(
-            low=-np.inf, 
-            high=np.inf, 
-            shape=(self.env.obs_cfg["num_obs"],)
-        )
-    
-    def _get_action_space(self):
-        # Create a gym-like action space
-        import gym
-        import numpy as np
-        return gym.spaces.Box(
-            low=-1.0, 
-            high=1.0, 
-            shape=(self.env.env_cfg["num_actions"],)
-        )
-        
-    def reset(self, task_idx=None):
-        # Reset the environment and return the initial observation
-        self.env.reset()
-        self._current_obs = self.env.obs_buf[0].clone().cpu().numpy()
-        return self._current_obs
-        
-    def step(self, action):
-        # Convert action to tensor if necessary
-        action_tensor = torch.from_numpy(action).to(self.env.device).unsqueeze(0)
-        
-        # Apply action and get rewards, next observations
-        self.env.step(action_tensor)
-        
-        # Get the observation for the first environment (for single-env case)
-        obs = self.env.obs_buf[0].clone().cpu().numpy()
-        reward = self.env.rew_buf[0].item()
-        done = self.env.reset_buf[0].item() > 0
-        
-        # Save current observation
-        self._current_obs = obs
-        
-        # Return step results with an empty info dict
-        return obs, reward, done, {}
-        
-    def render(self):
-        # Return an RGB array for visualization if needed
-        # This might not be directly available from Genesis
-        return None
-
 class DotDict(dict):
     """
     A dictionary that allows attribute-style access
@@ -329,9 +273,6 @@ def main():
     parser.add_argument("--log_dir", type=str, default="logs")
     args = parser.parse_args()
     
-    # Import torch here to avoid potential circular imports
-    import torch
-    
     gs.init(logging_level="warning")
 
     log_dir = f"{args.log_dir}/{args.exp_name}"
@@ -352,12 +293,10 @@ def main():
         device=args.device,
         show_viewer=args.show_viewer,
     )
-    
-    # Wrap it for TDMPC2
-    wrapped_env = ZbotTDMPC2Wrapper(zbot_env)
 
     # Create from existing dictionary
-    tdmpc2_cfg = get_train_cfg(args.exp_name, args.max_iterations, device=args.device)
+    tdmpc2_cfg = DotDict(get_train_cfg(args.exp_name, args.max_iterations, device=args.device))
+    tdmpc2_cfg_dict = get_train_cfg(args.exp_name, args.max_iterations, device=args.device)
     
     # Update config with environment-specific values
     tdmpc2_cfg.obs_shape = {"state": obs_cfg["num_obs"]}
@@ -374,39 +313,39 @@ def main():
     # Setup TDMPC2
     agent = TDMPC2(tdmpc2_cfg)
     buffer = Buffer(tdmpc2_cfg)
-    logger = Logger(tdmpc2_cfg)
+    logger = Logger(tdmpc2_cfg, tdmpc2_cfg_dict)
     
     # Create WandbLogger wrapper if using wandb
-    if args.use_wandb:
-        class WandbLogger:
-            def __init__(self, original_logger):
-                self.logger = original_logger
-                
-            def log(self, info):
-                # Log with original logger
-                self.logger.log(info)
-                
-                # Log to wandb
-                wandb_metrics = {}
-                for k, v in info.items():
-                    if isinstance(v, (int, float)):
-                        wandb_metrics[k] = v
-                wandb.log(wandb_metrics)
-        
-        wandb.init(
-            project=args.exp_name,
-            entity=args.wandb_entity,
-            name=f"{args.exp_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-            config={
-                "env_cfg": env_cfg,
-                "obs_cfg": obs_cfg,
-                "reward_cfg": reward_cfg,
-                "command_cfg": command_cfg,
-                "tdmpc2_cfg": tdmpc2_cfg
-            }
-        )
-        
-        logger = WandbLogger(logger)
+    #if args.use_wandb:
+    #    class WandbLogger:
+    #        def __init__(self, original_logger):
+    #            self.logger = original_logger
+    #            
+    #        def log(self, info):
+    #            # Log with original logger
+    #            self.logger.log(info)
+    #            
+    #            # Log to wandb
+    #            wandb_metrics = {}
+    #            for k, v in info.items():
+    #                if isinstance(v, (int, float)):
+    #                    wandb_metrics[k] = v
+    #            wandb.log(wandb_metrics)
+    #    
+    #    wandb.init(
+    #        project=args.exp_name,
+    #        entity=args.wandb_entity,
+    #        name=f"{args.exp_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+    #        config={
+    #            "env_cfg": env_cfg,
+    #            "obs_cfg": obs_cfg,
+    #            "reward_cfg": reward_cfg,
+    #            "command_cfg": command_cfg,
+    #            "tdmpc2_cfg": tdmpc2_cfg
+    #        }
+    #    )
+    #    
+    #    logger = WandbLogger(logger)
     
     # Initialize trainer
     trainer = OnlineTrainer(
