@@ -97,16 +97,34 @@ class WorldModel(nn.Module):
 			emb = emb.repeat(x.shape[0], 1)
 		return torch.cat([x, emb], dim=-1)
 
-	def encode(self, obs, task):
+	def encode(self, obs, task=None):
 		"""
-		Encodes an observation into its latent representation.
-		This implementation assumes a single state-based observation.
+		Encode observations to latent states.
 		"""
-		if self.cfg.multitask:
-			obs = self.task_emb(obs, task)
+		# For pixel observations
 		if self.cfg.obs == 'rgb' and obs.ndim == 5:
-			return torch.stack([self._encoder[self.cfg.obs](o) for o in obs])
-		return self._encoder[self.cfg.obs](obs)
+			batch_size, horizon, c, h, w = obs.shape
+			obs = obs.reshape(batch_size * horizon, c, h, w)
+			z = self._encoder['rgb'](obs)
+			z = z.reshape(batch_size, horizon, -1)
+		elif self.cfg.pixel_obs:
+			# Pixel observations stored in ModuleDict
+			if isinstance(self._encoder, nn.ModuleDict):
+				z = self._encoder[self.cfg.obs](obs)
+			else:
+				z = self._encoder(obs)
+		else:
+			# State observations using Sequential model
+			z = self._encoder(obs)  # No dictionary access needed for state observations
+
+		# Add task embedding if multitask
+		if self.cfg.multitask and task is not None:
+			task_emb = self._task_emb(task).unsqueeze(0) if task.ndim == 0 else self._task_emb(task)
+			if z.ndim == 3 and task_emb.ndim == 2:
+				task_emb = task_emb.unsqueeze(1).expand(-1, z.shape[1], -1)
+			z = torch.cat([z, task_emb], dim=-1)
+
+		return z
 
 	def next(self, z, a, task):
 		"""

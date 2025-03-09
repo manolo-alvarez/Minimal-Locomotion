@@ -17,6 +17,11 @@ import sys
 import shutil
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
+# Apply patches before importing TDMPC2
+from patch_tdmpc2 import apply_patches
+apply_patches()
+
+# Now import the patched modules
 from zbot_env import ZbotEnv
 from tdmpc2.tdmpc2 import TDMPC2
 from tdmpc2.common.buffer import Buffer  # Make sure this file exists
@@ -39,38 +44,43 @@ def get_tdmpc2_cfg(log_dir, num_envs):
     """Configure TDMPC2 for ZBot training."""
     cfg = {
         # Environment
-        "env_name": "ZBot",  # Just for logging
-        "obs_dim": 28,  # This will need to match your ZBot environment's observation space
-        "action_dim": 12,  # This will need to match your ZBot environment's action space
-        "episode_length": 1000,  # Match your episode length
+        "env_name": "ZBot",
+        "obs_dim": 28,  # Will be overridden later
+        "action_dim": 12,  # Will be overridden later
+        "episode_length": 1000,
+        
+        # Q-function parameters (needed for TD-MPC2)
+        "vmin": -10.0,  # Minimum Q-value for discretization
+        "vmax": 10.0,   # Maximum Q-value for discretization
         
         # Training
         "seed": 1,
-        "device": "cuda:0",  # Will override with args
+        "device": "mps",  # Use MPS on Apple Silicon
         "log_dir": log_dir,
         "save_interval": 50_000,
         "eval_interval": 10_000,
         "batch_size": 256,
-        "max_steps": 500_000,
-        "horizon": 5,  # Planning horizon
-        "iterations": 6,  # MPPI iterations
+        "max_steps": 100_000_000,
+        "horizon": 3,
+        "iterations": 6,
         
         # Architecture
-        "latent_dim": 128,
+        "latent_dim": 256,
         "hidden_dim": 512,
-        "mlp_dim": 512,  # Size of MLP hidden layers
+        "mlp_dim": 512,
         "num_layers": 4,
-        "num_filters": 32,  # For pixel-based (not used here)
-        "num_q": 5,  # Ensemble size
-        "task_dim": 0,  # For multitask learning (0 if disabled)
-        "num_bins": 100,  # For distributional RL (set to something > 0)
-        "dropout": 0.0,  # Dropout rate
+        "num_filters": 32,
+        "num_q": 5,
+        "task_dim": 96,
+        "num_bins": 101,
+        "dropout": 0.0,
         "log_std_min": -10.0,
         "log_std_max": 2.0,
+        "simnorm_dim": 8,
         
         # Buffer
-        "buffer_size": 500_000,  # Total replay buffer size
-        "num_envs": num_envs,  # Number of environments
+        "buffer_size": 1_000_000,
+        "num_envs": num_envs,
         
         # Algorithm
         "lr": 3e-4,
@@ -81,7 +91,7 @@ def get_tdmpc2_cfg(log_dir, num_envs):
         "num_pi_trajs": 0,
         "min_std": 0.1,
         "max_std": 0.5,
-        "tau": 0.005,  # Target network update rate
+        "tau": 0.005,
         "discount_min": 0.95,
         "discount_max": 0.99,
         "discount_denom": 200,
@@ -89,24 +99,23 @@ def get_tdmpc2_cfg(log_dir, num_envs):
         "consistency_coef": 1.0,
         "reward_coef": 1.0,
         "value_coef": 1.0,
-        "rho": 0.5,  # Discount for sequence losses
-        "beta": 1.0,  # Distributional reward/value prediction
+        "rho": 0.5,
+        "beta": 1.0,
         "discount": 0.99,
         "entropy_coef": 0.1,
-        
-        # Model-predictive control
         "mpc": True,
-        
-        # Observations
-        # For non-image observations, use a simple dictionary with a single key
-        "obs_shape": {"obs": None},  # Will be set later
-        "pixel_obs": False,  # We're not using pixel observations
         
         # Misc
         "multitask": False,
-        "tasks": [],         # List of task names for multitask learning
-        "action_dims": [],   # Action dimensions for each task in multitask
-        "compile": False,    # Whether to use torch.compile()
+        "tasks": [],
+        "action_dims": [],
+        "compile": False,
+        "steps": 0,
+        
+        # Simplify observation setup
+        "obs": "state",  # Not RGB
+        "pixel_obs": False,  # Not using pixel observations
+        "obs_shape": {"obs": None},  # Will be updated later
     }
     return cfg
 
@@ -225,6 +234,24 @@ class WandbTDMPC2Logger:
         wandb.log(metrics)
 
 
+def create_episode_td(obs_list, action_list, reward_list, device):
+    """Create a TensorDict for a complete episode."""
+    # Ensure all lists have the same length
+    assert len(obs_list) == len(action_list) == len(reward_list)
+    
+    # Stack tensors along time dimension
+    obs_tensor = torch.stack(obs_list)       # [T, obs_dim]
+    action_tensor = torch.stack(action_list) # [T, action_dim]
+    reward_tensor = torch.stack(reward_list) # [T]
+    
+    # Create TensorDict with expected structure
+    return TensorDict({
+        'obs': obs_tensor,
+        'action': action_tensor,
+        'reward': reward_tensor,
+    }, batch_size=[len(obs_list)])
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="zbot-tdmpc2")
@@ -281,17 +308,33 @@ def main():
         show_viewer=args.show_viewer,
     )
     
+    # Check MPS availability
+    mps_available = hasattr(torch, 'mps') and torch.backends.mps.is_available()
+    if mps_available and args.device == 'mps':
+        device = 'mps'
+        print("Using MPS device")
+    elif torch.cuda.is_available() and args.device == 'cuda':
+        device = 'cuda'
+        print("Using CUDA device")
+    else:
+        device = 'cpu'
+        print("Using CPU device")
+    
     # Setup TDMPC2
     tdmpc2_cfg = get_tdmpc2_cfg(log_dir, args.num_envs)
-    tdmpc2_cfg['device'] = args.device
+    tdmpc2_cfg['device'] = device  # Use the device we determined
     tdmpc2_cfg['max_steps'] = args.max_steps
     
     # Fix: Use the correct attributes from ZbotEnv
     tdmpc2_cfg['obs_dim'] = env.num_obs
     tdmpc2_cfg['action_dim'] = env.num_actions
     
-    # Set observation shape (required by layers.enc)
-    tdmpc2_cfg['obs_shape'] = {"obs": env.num_obs}
+    # For state-based observations
+    tdmpc2_cfg['pixel_obs'] = False
+    
+    # IMPORTANT: Create a valid obs_shape dictionary with 'obs' key
+    # This matches what the encoder expects
+    tdmpc2_cfg['obs_shape'] = {'obs': env.num_obs}
     
     # Add steps parameter required by Buffer
     tdmpc2_cfg['steps'] = args.max_steps * args.num_envs
@@ -302,7 +345,7 @@ def main():
     # Create the TDMPC2 agent
     agent = TDMPC2(tdmpc2_cfg)
     
-    # Create the Buffer with the configuration
+    # Initialize buffer
     buffer = Buffer(tdmpc2_cfg)
     
     # Load checkpoint if specified
@@ -317,39 +360,64 @@ def main():
     # Training loop
     print(f"Starting training for {args.max_steps} steps")
     obs = env.reset()
+    
+    # Process the observation
     if isinstance(obs, tuple):
         obs = obs[0]  # Get only the actor observations if it returns a tuple
-        
-    # Convert to tensor if it's numpy
+    
+    # Convert to tensor
     if isinstance(obs, np.ndarray):
         obs = torch.FloatTensor(obs).to(agent.device)
     
+    # Print observation shape for debugging
+    print(f"Initial observation shape: {obs.shape}")
+    
+    # Take a single environment's observation for evaluation and action selection
+    # This is critical because TDMPC2 only supports one environment at a time for planning
+    eval_obs = obs[0].unsqueeze(0) if obs.dim() > 1 else obs
+    print(f"Evaluation observation shape: {eval_obs.shape}")
+    
+    # Initialize tracking variables
     done = torch.zeros(args.num_envs, dtype=torch.bool, device=agent.device)
     episode_reward = torch.zeros(args.num_envs, device=agent.device)
     episode_length = torch.zeros(args.num_envs, dtype=torch.long, device=agent.device)
     episode_rewards = []
     
-    # Create episode tensors for buffer
-    episode_obs = []
-    episode_actions = []
-    episode_rewards_buffer = []
+    # Initialize episode storage as a list of lists (one list per environment)
+    episode_obs = [[] for _ in range(args.num_envs)]
+    episode_actions = [[] for _ in range(args.num_envs)]
+    episode_rewards_buffer = [[] for _ in range(args.num_envs)]
     
     for step in range(args.max_steps):
-        # Act in the environment
+        # Act in the environment using the evaluation observation
         with torch.no_grad():
-            action = agent.act(obs, t0=(episode_length == 0), eval_mode=False)
-            action_np = action.cpu().numpy()
+            action = agent.act(eval_obs, t0=(episode_length[0] == 0), eval_mode=False)
+            
+            # Expand action to all environments
+            if args.num_envs > 1:
+                action_expanded = action.unsqueeze(0).expand(args.num_envs, -1)
+                # IMPORTANT: Keep as tensor for environment step function
+                action_tensor = action_expanded
+            else:
+                action_tensor = action.unsqueeze(0) if action.dim() == 1 else action
         
-        # Store current observation and action
-        episode_obs.append(obs.clone())
-        episode_actions.append(action.clone())
+        # Store current observations and actions
+        for env_idx in range(args.num_envs):
+            episode_obs[env_idx].append(obs[env_idx].clone())
+            episode_actions[env_idx].append(action_tensor[env_idx].clone())
         
-        # Step the environment
-        next_obs, reward, dones, info = env.step(action_np)
+        # Step the environment with tensor
+        next_obs, reward, dones, info = env.step(action_tensor)
         
-        # Convert to tensors if needed
+        # Convert next_obs to tensor if needed
         if isinstance(next_obs, np.ndarray):
             next_obs = torch.FloatTensor(next_obs).to(agent.device)
+        
+        # Reshape if needed
+        if next_obs.dim() == 1:
+            next_obs = next_obs.unsqueeze(0)
+            
+        # Convert rewards and dones to tensors if needed
         if isinstance(reward, np.ndarray):
             reward = torch.FloatTensor(reward).to(agent.device)
         if isinstance(dones, np.ndarray):
@@ -357,8 +425,9 @@ def main():
         else:
             done = dones.bool()
         
-        # Store reward
-        episode_rewards_buffer.append(reward.clone())
+        # Store rewards AFTER getting them from env.step()
+        for env_idx in range(args.num_envs):
+            episode_rewards_buffer[env_idx].append(reward[env_idx].clone())
         
         # Update metrics
         episode_reward += reward
@@ -372,19 +441,28 @@ def main():
                     # Get episode data for this environment
                     ep_length = episode_length[env_idx].item()
                     
-                    # Create TensorDict with episode data
-                    td = TensorDict({
-                        'obs': torch.stack([episode_obs[t][env_idx] for t in range(ep_length)]),
-                        'action': torch.stack([episode_actions[t][env_idx] for t in range(ep_length)]),
-                        'reward': torch.stack([episode_rewards_buffer[t][env_idx] for t in range(ep_length)]),
-                    })
+                    # Skip if episode is empty
+                    if ep_length == 0:
+                        print(f"Warning: Empty episode for environment {env_idx}. Skipping.")
+                        continue
                     
-                    # Add task if multitask is enabled
-                    if tdmpc2_cfg['multitask']:
-                        td['task'] = torch.zeros(ep_length, dtype=torch.long, device=agent.device)
-                    
-                    # Add to buffer
-                    buffer.add(td)
+                    try:
+                        # Create TensorDict with episode data
+                        td = TensorDict({
+                            'obs': torch.stack(episode_obs[env_idx]),
+                            'action': torch.stack(episode_actions[env_idx]), 
+                            'reward': torch.stack(episode_rewards_buffer[env_idx]),
+                        }, batch_size=[len(episode_obs[env_idx])])
+                        
+                        # Add task if multitask is enabled
+                        if tdmpc2_cfg['multitask']:
+                            td['task'] = torch.zeros(ep_length, dtype=torch.long, device=agent.device)
+                        
+                        # Add to buffer - print shape for debugging
+                        buffer.add(td)
+                        
+                    except Exception as e:
+                        print(f"Error creating TensorDict for environment {env_idx}: {e}")
                     
                     # Track statistics
                     if done[env_idx]:
@@ -396,10 +474,12 @@ def main():
                     episode_reward[env_idx] = 0
                     episode_length[env_idx] = 0
             
-            # Reset episode storage
-            episode_obs = []
-            episode_actions = []
-            episode_rewards_buffer = []
+            # Reset episode storage for completed episodes
+            for env_idx in range(args.num_envs):
+                if done[env_idx] or episode_length[env_idx] >= tdmpc2_cfg['episode_length']:
+                    episode_obs[env_idx] = []
+                    episode_actions[env_idx] = []
+                    episode_rewards_buffer[env_idx] = []
             
             # Reset environment
             obs = env.reset()

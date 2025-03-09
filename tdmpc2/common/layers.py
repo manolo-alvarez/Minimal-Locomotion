@@ -79,7 +79,8 @@ class SimNorm(nn.Module):
 
 	def __init__(self, cfg):
 		super().__init__()
-		self.dim = cfg.simnorm_dim
+		# Add a default value
+		self.dim = getattr(cfg, 'simnorm_dim', 8)
 
 	def forward(self, x):
 		shp = x.shape
@@ -150,18 +151,46 @@ def conv(in_shape, num_channels, act=None):
 	return nn.Sequential(*layers)
 
 
-def enc(cfg, out={}):
-	"""
-	Returns a dictionary of encoders for each observation in the dict.
-	"""
-	for k in cfg.obs_shape.keys():
-		if k == 'state':
-			out[k] = mlp(cfg.obs_shape[k][0] + cfg.task_dim, max(cfg.num_enc_layers-1, 1)*[cfg.enc_dim], cfg.latent_dim, act=SimNorm(cfg))
-		elif k == 'rgb':
-			out[k] = conv(cfg.obs_shape[k], cfg.num_channels, act=SimNorm(cfg))
-		else:
-			raise NotImplementedError(f"Encoder for observation type {k} not implemented.")
-	return nn.ModuleDict(out)
+def enc(cfg):
+    """
+    Create encoder based on config.
+    Handles both pixel and state observations.
+    """
+    if not cfg.pixel_obs:
+        # For state-based observations, just return a simple MLP encoder
+        return nn.Sequential(
+            nn.Linear(cfg.obs_dim, cfg.latent_dim),
+            SimNorm(cfg)
+        )
+    
+    modules = nn.ModuleDict()
+    for k in cfg.obs_shape.keys():
+        if k == 'obs':
+            # Handle our state-based observations
+            modules[k] = nn.Sequential(
+                nn.Linear(cfg.obs_dim, cfg.latent_dim),
+                SimNorm(cfg)
+            )
+        elif k == 'pixels':
+            # Original code for pixel observations
+            modules[k] = nn.Sequential(
+                nn.Conv2d(3, cfg.num_filters, 3, stride=2, padding=1),
+                SimNorm(cfg),
+                nn.Conv2d(cfg.num_filters, cfg.num_filters, 3, stride=2, padding=1),
+                SimNorm(cfg),
+                nn.Conv2d(cfg.num_filters, cfg.num_filters, 3, stride=2, padding=1),
+                SimNorm(cfg),
+                nn.Flatten(),
+                nn.Linear(cfg.num_filters * 8 * 8, cfg.latent_dim),
+                SimNorm(cfg)
+            )
+        else:
+            raise NotImplementedError(f"Encoder for observation type {k} not implemented.")
+    
+    if len(modules) == 1:
+        return modules[list(modules.keys())[0]]
+    else:
+        return modules
 
 
 def api_model_conversion(target_state_dict, source_state_dict):

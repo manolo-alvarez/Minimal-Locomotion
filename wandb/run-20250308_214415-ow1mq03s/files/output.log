@@ -1,0 +1,79 @@
+Removing existing log directory: logs/zbot-tdmpc2
+Created log directory: logs/zbot-tdmpc2
+[38;5;226m[Genesis] [21:45:00] [WARNING] Non-linux system detected. In order to use the interactive viewer, you need to manually run simulation in a separate thread and then start viewer. See `examples/render_on_macos.py`.[0m
+Using MPS device
+Starting training for 100000 steps
+Initial observation shape: torch.Size([16, 39])
+Evaluation observation shape: torch.Size([1, 39])
+Step: 0, Avg Reward: 0.00, Buffer Episodes: 0
+Buffer capacity: 500,000
+Storage required: 26.00 GB
+Using CPU memory for storage.
+Step: 1000, Avg Reward: 0.00, Buffer Episodes: 16
+Step: 2000, Avg Reward: 0.00, Buffer Episodes: 32
+Step: 3000, Avg Reward: 0.00, Buffer Episodes: 48
+Step: 4000, Avg Reward: 0.00, Buffer Episodes: 64
+Step: 5000, Avg Reward: 0.00, Buffer Episodes: 80
+Step: 6000, Avg Reward: 0.00, Buffer Episodes: 96
+Step: 7000, Avg Reward: 0.00, Buffer Episodes: 112
+Step: 8000, Avg Reward: 0.00, Buffer Episodes: 128
+Step: 9000, Avg Reward: 0.00, Buffer Episodes: 144
+Step: 10000, Avg Reward: 0.00, Buffer Episodes: 160
+Step: 11000, Avg Reward: 0.00, Buffer Episodes: 176
+Step: 12000, Avg Reward: 0.00, Buffer Episodes: 192
+Step: 13000, Avg Reward: 0.00, Buffer Episodes: 208
+Step: 14000, Avg Reward: 0.00, Buffer Episodes: 224
+Step: 15000, Avg Reward: 0.00, Buffer Episodes: 240
+Step: 16000, Avg Reward: 0.00, Buffer Episodes: 256
+Error in _td_target after reshape: The size of tensor a (0) must match the size of tensor b (1280) at non-singleton dimension 1
+  reward shape after reshape: torch.Size([5, 0, 1])
+  q_values shape after reshape: torch.Size([1280, 1])
+Traceback (most recent call last):
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/patch_tdmpc2.py", line 372, in fixed_td_target
+    return reward + discount * q_values
+           ~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+RuntimeError: The size of tensor a (0) must match the size of tensor b (1280) at non-singleton dimension 1
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/zbot_tdmpc2_train.py", line 525, in <module>
+    main()
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/zbot_tdmpc2_train.py", line 496, in main
+    update_info = agent.update(buffer)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/tdmpc2/tdmpc2.py", line 333, in update
+    return self._update(obs, action, reward, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/tdmpc2/tdmpc2.py", line 258, in _update
+    td_targets = self._td_target(next_z, reward, task)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/patch_tdmpc2.py", line 384, in fixed_td_target
+    result = reward_flat[:, :min_dim] + discount * q_values_flat[:, :min_dim]
+             ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+RuntimeError: The size of tensor a (5) must match the size of tensor b (1280) at non-singleton dimension 0
+Traceback (most recent call last):
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/patch_tdmpc2.py", line 372, in fixed_td_target
+    return reward + discount * q_values
+           ~~~~~~~^~~~~~~~~~~~~~~~~~~~~
+RuntimeError: The size of tensor a (0) must match the size of tensor b (1280) at non-singleton dimension 1
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/zbot_tdmpc2_train.py", line 525, in <module>
+    main()
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/zbot_tdmpc2_train.py", line 496, in main
+    update_info = agent.update(buffer)
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/tdmpc2/tdmpc2.py", line 333, in update
+    return self._update(obs, action, reward, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/tdmpc2/tdmpc2.py", line 258, in _update
+    td_targets = self._td_target(next_z, reward, task)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/patch_tdmpc2.py", line 384, in fixed_td_target
+    result = reward_flat[:, :min_dim] + discount * q_values_flat[:, :min_dim]
+             ~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+RuntimeError: The size of tensor a (5) must match the size of tensor b (1280) at non-singleton dimension 0
+[0m

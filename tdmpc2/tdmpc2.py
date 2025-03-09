@@ -19,7 +19,7 @@ class TDMPC2(torch.nn.Module):
 	def __init__(self, cfg):
 		super().__init__()
 		self.cfg = cfg
-		self.device = torch.device('cuda:0')
+		self.device = torch.device('mps')
 		self.model = WorldModel(cfg).to(self.device)
 		self.optim = torch.optim.Adam([
 			{'params': self.model._encoder.parameters(), 'lr': self.cfg.lr*self.cfg.enc_lr_scale},
@@ -34,7 +34,7 @@ class TDMPC2(torch.nn.Module):
 		self.scale = RunningScale(cfg)
 		self.cfg.iterations += 2*int(cfg.action_dim >= 20) # Heuristic for large action spaces
 		self.discount = torch.tensor(
-			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='cuda:0'
+			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='mps'
 		) if self.cfg.multitask else self._get_discount(cfg.episode_length)
 		self._prev_mean = torch.nn.Buffer(torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device))
 		if cfg.compile:
@@ -111,12 +111,12 @@ class TDMPC2(torch.nn.Module):
 		if task is not None:
 			task = torch.tensor([task], device=self.device)
 		if self.cfg.mpc:
-			return self.plan(obs, t0=t0, eval_mode=eval_mode, task=task).cpu()
+			return self.plan(obs, t0=t0, eval_mode=eval_mode, task=task)
 		z = self.model.encode(obs, task)
 		action, info = self.model.pi(z, task)
 		if eval_mode:
 			action = info["mean"]
-		return action[0].cpu()
+		return action[0]
 
 	@torch.no_grad()
 	def _estimate_value(self, z, actions, task):
@@ -329,5 +329,5 @@ class TDMPC2(torch.nn.Module):
 		kwargs = {}
 		if task is not None:
 			kwargs["task"] = task
-		torch.compiler.cudagraph_mark_step_begin()
+		#torch.compiler.cudagraph_mark_step_begin()
 		return self._update(obs, action, reward, **kwargs)
