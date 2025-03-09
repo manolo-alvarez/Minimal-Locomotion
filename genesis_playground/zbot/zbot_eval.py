@@ -9,6 +9,7 @@ import pygame
 from zbot_env import ZbotEnv
 from rsl_rl.runners import OnPolicyRunner
 from policy_analyzer import PolicyAnalyzer  # Add this import at the module level
+import random
 
 import genesis as gs
 
@@ -120,9 +121,27 @@ def apply_fixed_cmd(obs: torch.Tensor, fixed_cmd: dict) -> torch.Tensor:
 def deg2rad(deg):
     return deg * np.pi / 180
 
-def run_sim(env, policy_fn, obs, use_keyboard=False, base_policy=None, screen=None):
+def get_random_command():
     """
-    Runs the simulation loop for a fixed timespan.
+    Generate a random valid command for the ZBot robot based on the training ranges.
+    
+    Returns:
+        dict: A dictionary with x, y, and yaw velocity commands
+    """
+    # These ranges match what's defined in zbot_train.py command_cfg
+    x_range = [-0.2, 0.4]  # Forward/backward velocity
+    y_range = [0.0, 0.0]   # Lateral velocity (fixed at 0 for ZBot)
+    yaw_range = [-0.4, 0.4]  # Angular velocity
+    
+    x_cmd = random.uniform(x_range[0], x_range[1])
+    y_cmd = random.uniform(y_range[0], y_range[1])
+    yaw_cmd = random.uniform(yaw_range[0], yaw_range[1])
+    
+    return {"x": x_cmd, "y": y_cmd, "yaw": yaw_cmd}
+
+def run_sim(env, policy_fn, obs, use_keyboard=False, base_policy=None, screen=None, num_rollouts=1, save_results=False, log_dir=None, random_commands=False):
+    """
+    Runs the simulation loop for a fixed timespan or number of rollouts.
     
     Args:
         env: The environment
@@ -131,13 +150,22 @@ def run_sim(env, policy_fn, obs, use_keyboard=False, base_policy=None, screen=No
         use_keyboard: Whether to use keyboard control
         base_policy: Base policy to use for keyboard control
         screen: Pygame screen (passed from main thread when use_keyboard=True)
+        num_rollouts: Number of rollouts to complete before stopping
+        save_results: Whether to save evaluation results
+        log_dir: Directory to save results
     """
     timesteps = 0
     max_timesteps = 2000
+    rollouts_completed = 0
     
-    # Continue simulation until stopped
+    # For tracking evaluation metrics
+    eval_results = []
+    current_episode_reward = 0
+    episode_length = 0
+    
+    # Continue simulation until stopped or rollouts completed
     try:
-        while timesteps < max_timesteps:
+        while rollouts_completed < num_rollouts:
             if use_keyboard:
                 # Use the USER_CMD global variable that's updated from the main thread
                 x_cmd = USER_CMD["x"]
@@ -152,8 +180,14 @@ def run_sim(env, policy_fn, obs, use_keyboard=False, base_policy=None, screen=No
                 with torch.no_grad():
                     actions = base_policy(obs)
             else:
-                # Apply fixed command and use policy
-                fixed_cmd = {"x": 1.0, "y": 0.0, "yaw": 0.0}
+                # Generate a new random command for each rollout
+                if random_commands:
+                    if episode_length == 0:
+                        fixed_cmd = get_random_command()
+                        print(f"New command: x={fixed_cmd['x']:.2f}, y={fixed_cmd['y']:.2f}, yaw={fixed_cmd['yaw']:.2f}")
+                else:
+                    fixed_cmd = {"x": 0.2, "y": 0.0, "yaw": 0.0}
+                # Apply command and use policy
                 modified_obs = obs.clone()
                 modified_obs[:, 6] = fixed_cmd["x"]
                 modified_obs[:, 7] = fixed_cmd["y"]
@@ -164,10 +198,44 @@ def run_sim(env, policy_fn, obs, use_keyboard=False, base_policy=None, screen=No
 
             # Step the environment
             obs, rews, dones, infos = env.step(actions)
+            
+            # Update metrics
+            current_episode_reward += rews.item()
+            episode_length += 1
             timesteps += 1
+            
+            # Check if episode is done
+            if dones.item():
+                print(f"Rollout {rollouts_completed + 1} completed: reward={current_episode_reward:.5f}, length={episode_length}")
+                
+                # Record results
+                if save_results:
+                    eval_results.append({
+                        "rollout": rollouts_completed,
+                        "reward": current_episode_reward,
+                        "length": episode_length
+                    })
+                
+                # Reset episode tracking
+                current_episode_reward = 0
+                episode_length = 0
+                rollouts_completed += 1
+                
+                # Reset environment if we need more rollouts
+                if rollouts_completed < num_rollouts:
+                    obs, _ = env.get_observations()
 
     except Exception as e:
         print(f"Simulation error: {e}")
+    
+    # Save evaluation results if requested
+    if save_results and eval_results and log_dir:
+        results_path = os.path.join(log_dir, "eval_results.txt")
+        with open(results_path, "w") as f:
+            f.write("rollout,reward,length\n")
+            for result in eval_results:
+                f.write(f"{result['rollout']},{result['reward']:.4f},{result['length']}\n")
+        print(f"Evaluation results saved to {results_path}")
 
 def analyze_policy(env, runner, save_dir="feature_analysis", num_samples=1000, device="cpu", seed=0):
     """
@@ -546,13 +614,33 @@ def main():
                       help="Show the Genesis viewer")
     parser.add_argument("--log_dir", type=str, default="logs",
                       help="Directory to save logs")
+    parser.add_argument("--save_results", action="store_true", default=False,
+                      help="Save results to wandb")
+    parser.add_argument("--num_rollouts", type=int, default=1,
+                      help="Number of rollouts to evaluate")
+    parser.add_argument("--random_commands", action="store_true", default=False,
+                      help="Use random commands for evaluation")
     args = parser.parse_args()
 
     gs.init()
 
     log_dir = f"{args.log_dir}/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(open(f"{args.log_dir}/{args.exp_name}/cfgs.pkl", "rb"))
-    reward_cfg["reward_scales"] = {}
+
+    reward_cfg = {
+        "tracking_sigma": 0.25,
+        "base_height_target": 0.3,
+        "feet_height_target": 0.075,
+        "reward_scales": {
+            "tracking_lin_vel": 1.0,
+            "tracking_ang_vel": 0.2,
+            "lin_vel_z": -1.0,
+            "base_height": -50.0,
+            "action_rate": -0.005,
+            "similar_to_default": -0.1,
+            "feet_air_time": 5.0,
+        },
+    }
 
     # Create environment with show_viewer=True directly
     env = ZbotEnv(
@@ -704,7 +792,7 @@ def main():
         with torch.no_grad():
             gs.tools.run_in_another_thread(
                 run_sim, 
-                args=(env, policy, obs)
+                args=(env, policy, obs, args.use_keyboard, policy, None, args.num_rollouts, args.save_results, log_dir, args.random_commands)
             )
             
             # Start the viewer in the main thread if available
@@ -718,7 +806,7 @@ def main():
                 print("Warning: Scene viewer not available.")
     else:
         # Run without the viewer
-        run_sim(env, policy, obs)
+        run_sim(env, policy, obs, args.use_keyboard, policy, None, args.num_rollouts, args.save_results, log_dir, args.random_commands)
         
 if __name__ == "__main__":
     main()
