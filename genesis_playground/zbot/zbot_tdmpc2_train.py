@@ -17,10 +17,6 @@ import sys
 import shutil
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
 
-# Apply patches before importing TDMPC2
-from patch_tdmpc2 import apply_patches
-apply_patches()
-
 # Now import the patched modules
 from zbot_env import ZbotEnv
 from tdmpc2.tdmpc2 import TDMPC2
@@ -86,7 +82,7 @@ def get_tdmpc2_cfg(log_dir, num_envs):
         "lr": 3e-4,
         "enc_lr_scale": 1.0,
         "temperature": 10.0,
-        "num_samples": 512,
+        "num_samples": 24,
         "num_elites": 64,
         "num_pi_trajs": 0,
         "min_std": 0.1,

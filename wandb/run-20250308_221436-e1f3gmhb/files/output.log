@@ -1,0 +1,272 @@
+Removing existing log directory: logs/zbot-tdmpc2
+Created log directory: logs/zbot-tdmpc2
+[38;5;226m[Genesis] [22:14:42] [WARNING] Non-linux system detected. In order to use the interactive viewer, you need to manually run simulation in a separate thread and then start viewer. See `examples/render_on_macos.py`.[0m
+Using MPS device
+Starting training for 100000 steps
+Initial observation shape: torch.Size([16, 39])
+Evaluation observation shape: torch.Size([1, 39])
+Step: 0, Avg Reward: 0.00, Buffer Episodes: 0
+Buffer capacity: 1,000,000
+Using CPU memory for buffer storage (for stability)
+Step: 1000, Avg Reward: 0.00, Buffer Episodes: 16
+Step: 2000, Avg Reward: 0.00, Buffer Episodes: 32
+Step: 3000, Avg Reward: 0.00, Buffer Episodes: 48
+Step: 4000, Avg Reward: 0.00, Buffer Episodes: 64
+Step: 5000, Avg Reward: 0.00, Buffer Episodes: 80
+Step: 6000, Avg Reward: 0.00, Buffer Episodes: 96
+Step: 7000, Avg Reward: 0.00, Buffer Episodes: 112
+Step: 8000, Avg Reward: 0.00, Buffer Episodes: 128
+Step: 9000, Avg Reward: 0.00, Buffer Episodes: 144
+Step: 10000, Avg Reward: 0.00, Buffer Episodes: 160
+Step: 11000, Avg Reward: 0.00, Buffer Episodes: 176
+Step: 12000, Avg Reward: 0.00, Buffer Episodes: 192
+Step: 13000, Avg Reward: 0.00, Buffer Episodes: 208
+Step: 14000, Avg Reward: 0.00, Buffer Episodes: 224
+Step: 15000, Avg Reward: 0.00, Buffer Episodes: 240
+Step: 16000, Avg Reward: 0.00, Buffer Episodes: 256
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Step: 17000, Avg Reward: 0.00, Buffer Episodes: 272
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Step: 18000, Avg Reward: 0.00, Buffer Episodes: 288
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info
+Update shape error: linear(): input and weight.T shapes cannot be multiplied (256x266 and 362x512)
+Creating synthetic training info

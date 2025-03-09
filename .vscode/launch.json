@@ -36,12 +36,12 @@
             "name": "zbot_train (mps)",
             "type": "debugpy",
             "request": "launch",
-            "program": "genesis_playground/zbot/zbot_train.py",
+            "program": "genesis_playground/zbot/zbot_tdmpc2_train.py",
             "console": "integratedTerminal",
             "args": [
-                "-e", "zbot-walking", 
-                "--num_envs", "4096",
-                "--device", "mps"
+                "--num_envs", "1",
+                "--device", "mps",
+                "--max_steps", "1000"
             ]
         },
         {

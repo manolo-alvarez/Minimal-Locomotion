@@ -1,0 +1,46 @@
+Removing existing log directory: logs/zbot-tdmpc2
+Created log directory: logs/zbot-tdmpc2
+[38;5;226m[Genesis] [22:35:46] [WARNING] Non-linux system detected. In order to use the interactive viewer, you need to manually run simulation in a separate thread and then start viewer. See `examples/render_on_macos.py`.[0m
+Using MPS device
+Starting training for 1000 steps
+Initial observation shape: torch.Size([1, 39])
+Evaluation observation shape: torch.Size([1, 39])
+Traceback (most recent call last):
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/zbot_tdmpc2_train.py", line 521, in <module>
+    main()
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/zbot_tdmpc2_train.py", line 390, in main
+    action = agent.act(eval_obs, t0=(episode_length[0] == 0), eval_mode=False)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/miniforge3/envs/minimal_walking/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/tdmpc2/tdmpc2.py", line 114, in act
+    return self.plan(obs, t0=t0, eval_mode=eval_mode, task=task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/miniforge3/envs/minimal_walking/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/tdmpc2/tdmpc2.py", line 159, in _plan
+    z = z.repeat(self.cfg.num_samples, 1)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor
+Traceback (most recent call last):
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/zbot_tdmpc2_train.py", line 521, in <module>
+    main()
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/zbot_tdmpc2_train.py", line 390, in main
+    action = agent.act(eval_obs, t0=(episode_length[0] == 0), eval_mode=False)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/miniforge3/envs/minimal_walking/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/tdmpc2/tdmpc2.py", line 114, in act
+    return self.plan(obs, t0=t0, eval_mode=eval_mode, task=task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/miniforge3/envs/minimal_walking/lib/python3.11/site-packages/torch/utils/_contextlib.py", line 116, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/manoloalvarez/playground/Minimal-Locomotion/tdmpc2/tdmpc2.py", line 159, in _plan
+    z = z.repeat(self.cfg.num_samples, 1)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: Number of dimensions of repeat dims can not be smaller than number of dimensions of tensor
+[0m
