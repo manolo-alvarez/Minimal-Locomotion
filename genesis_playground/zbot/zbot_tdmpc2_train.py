@@ -27,55 +27,101 @@ from tdmpc2 import TDMPC2
 from tdmpc2.common.buffer import Buffer
 from tdmpc2.common.logger import Logger
 
-
-def get_train_cfg(exp_name, max_iterations):
+def get_train_cfg(exp_name, max_iterations, device="mps"):
+    """
+    Create a configuration dictionary that matches the structure from config.yaml
+    but keeps some parameters from the original train_cfg
+    """
+    # Create a config that matches the YAML format
     train_cfg_dict = {
-        "algorithm": {
-            "clip_param": 0.2,
-            "desired_kl": 0.01,
-            "entropy_coef": 0.01,
-            "gamma": 0.99,
-            "lam": 0.95,
-            "learning_rate": 0.001,
-            "max_grad_norm": 1.0,
-            "num_learning_epochs": 5,
-            "num_mini_batches": 4,
-            "schedule": "adaptive",
-            "use_clipped_value_loss": True,
-            "value_loss_coef": 1.0,
-            "class_name": "PPO",
-        },
-        "init_member_classes": {},
-        "policy": {
-            "activation": "elu",
-            "actor_hidden_dims": [512, 256, 128],
-            "critic_hidden_dims": [512, 256, 128],
-            "init_noise_std": 1.0,
-            "class_name": "ActorCritic",
-        },
-        "runner": {
-            "algorithm_class_name": "PPO",
-            "checkpoint": -1,
-            "experiment_name": exp_name,
-            "load_run": -1,
-            "log_interval": 1,
-            "max_iterations": max_iterations,
-            "num_steps_per_env": 48,
-            "policy_class_name": "ActorCritic",
-            "record_interval": -1,
-            "resume": False,
-            "resume_path": None,
-            "run_name": "",
-            "runner_class_name": "OnPolicyRunner",
-        },
-        "runner_class_name": "OnPolicyRunner",
+        # environment
+        "task": "zbot",
+        "task_title": "ZBot Locomotion",
+        "obs": "state",
+        
+        # evaluation
+        "checkpoint": None,
+        "eval_episodes": 10,
+        "eval_freq": 50000,
+        
+        # training
+        "steps": max_iterations * 48 * 100,  # Convert iterations to steps
+        "batch_size": 256,
+        "reward_coef": 0.1,
+        "value_coef": 0.1,
+        "consistency_coef": 20,
+        "rho": 0.5,
+        "lr": 3e-4,
+        "enc_lr_scale": 0.3,
+        "grad_clip_norm": 20,
+        "tau": 0.01,
+        "discount_denom": 5,
+        "discount_min": 0.95,
+        "discount_max": 0.995,
+        "buffer_size": 1_000_000,
+        "capacity": 1_000_000,  # Alias for buffer_size used in TDMPC2
+        "exp_name": exp_name,
+        
+        # planning
+        "mpc": True,
+        "iterations": 6,
+        "num_samples": 512,
+        "num_elites": 64,
+        "num_pi_trajs": 24,
+        "horizon": 3,
+        "min_std": 0.05,
+        "max_std": 2,
+        "temperature": 0.5,
+        
+        # actor
+        "log_std_min": -10,
+        "log_std_max": 2,
+        "entropy_coef": 1e-4,
+        
+        # critic
+        "num_bins": 101,
+        "vmin": -10,
+        "vmax": 10,
+        
+        # architecture
+        "model_size": 5,  # Choose from [1, 5, 19, 48, 317]
+        "num_enc_layers": 2,
+        "enc_dim": 256,
+        "num_channels": 32,
+        "mlp_dim": 512,
+        "latent_dim": 512,
+        "task_dim": 0,
+        "num_q": 5,
+        "dropout": 0.01,
+        "simnorm_dim": 8,
+        
+        # logging
+        "wandb_project": exp_name,
+        "wandb_entity": None,
+        "wandb_silent": False,
+        "enable_wandb": False,  # We'll handle wandb separately
+        "save_csv": True,
+        
+        # misc
+        "save_video": True,
+        "save_agent": True,
         "seed": 1,
-        "num_steps_per_env": 48,
-        "save_interval": 100,
-        "empirical_normalization": False
+        "device": device,
+        "compile": False,
+        
+        # essential parameters for TDMPC2 that aren't in the YAML
+        "work_dir": f"logs/{exp_name}",
+        "multitask": False,
+        "num_workers": 4,  # For data loading
+        
+        # These will be filled in by the environment wrapper
+        "obs_shape": {"observations": 39},  # Will be overridden
+        "obs_dim": 39,  # Will be overridden
+        "action_dim": 10,  # Will be overridden
+        "episode_length": 1000,  # Will be overridden
     }
 
-    return train_cfg_dict
+    return DotDict(train_cfg_dict)
 
 
 def get_env_cfg():
@@ -173,63 +219,6 @@ def get_env_cfg():
 
     return env_cfg, obs_cfg, reward_cfg, command_cfg
 
-def get_tdmpc2_cfg(env_cfg, obs_cfg, reward_cfg, command_cfg, log_dir, exp_name="zbot-tdmpc2"):
-    # Basic TDMPC2 configuration
-    cfg = {
-        # Model size - choose based on your compute resources
-        "model_size": 5,  # Can be one of [1, 5, 19, 48, 317]
-        
-        # Environment settings (from your env config)
-        "episode_length": int(env_cfg["episode_length_s"] * 50),  # Assuming 50Hz control frequency
-        "action_dim": env_cfg["num_actions"],
-        "obs_dim": obs_cfg["num_obs"],
-        
-        # Training parameters
-        "steps": env_cfg["episode_length_s"] * 50 * 1000,  # Total training steps
-        "horizon": 8,  # Planning horizon
-        "batch_size": 256,
-        "lr": 1e-4,
-        "discount_min": 0.95,
-        "discount_max": 0.99,
-        "discount_denom": 200,
-        
-        # MPC parameters
-        "mpc": True,
-        "iterations": 5,
-        "num_samples": 512,
-        "num_elites": 64,
-        "num_pi_trajs": 8,
-        "temperature": 0.5,
-        "min_std": 0.05,
-        "max_std": 0.5,
-        
-        # Device
-        "device": "mps" if torch.mps.is_available() else "cpu",
-        "compile": False,  # Set to True if using newer PyTorch versions for speedup
-        
-        # Task-related
-        "multitask": False,
-        
-        # Loss coefficients
-        "consistency_coef": 1.0,
-        "reward_coef": 1.0,
-        "value_coef": 1.0,
-        "rho": 0.5,
-        "grad_clip_norm": 10.0,
-        "num_q": 2,
-        
-        # Buffer settings
-        "capacity": 1_000_000,
-        "num_workers": 4,
-        
-        # Logging and saving
-        "work_dir": os.path.join(log_dir, exp_name),
-        "checkpoint": None,
-        "seed": 1,
-    }
-    
-    return cfg
-
 class WandbOnPolicyRunner(OnlineTrainer):
     def log(self, info):
         super().log(info)
@@ -300,6 +289,33 @@ class ZbotTDMPC2Wrapper:
         # This might not be directly available from Genesis
         return None
 
+class DotDict(dict):
+    """
+    A dictionary that allows attribute-style access
+    while still behaving like a regular dictionary.
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Convert nested dictionaries to DotDict
+        for key, value in self.items():
+            if isinstance(value, dict):
+                self[key] = DotDict(value)
+    
+    def __getattr__(self, key):
+        try:
+            return self[key]
+        except KeyError:
+            raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{key}'")
+    
+    def __setattr__(self, key, value):
+        self[key] = value
+        
+    # Optional: Convert nested dictionaries when setting items
+    def __setitem__(self, key, value):
+        if isinstance(value, dict) and not isinstance(value, DotDict):
+            value = DotDict(value)
+        super().__setitem__(key, value)
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-e", "--exp_name", type=str, default="zbot-tdmpc2")
@@ -339,15 +355,21 @@ def main():
     
     # Wrap it for TDMPC2
     wrapped_env = ZbotTDMPC2Wrapper(zbot_env)
+
+    # Create from existing dictionary
+    tdmpc2_cfg = get_train_cfg(args.exp_name, args.max_iterations, device=args.device)
     
-    # Get TDMPC2 configuration
-    tdmpc2_cfg = get_tdmpc2_cfg(env_cfg, obs_cfg, reward_cfg, command_cfg, log_dir)
+    # Update config with environment-specific values
+    tdmpc2_cfg.obs_shape = {"state": obs_cfg["num_obs"]}
+    tdmpc2_cfg.obs_dim = obs_cfg["num_obs"]
+    tdmpc2_cfg.action_dim = env_cfg["num_actions"]
+    tdmpc2_cfg.episode_length = int(env_cfg["episode_length_s"] * 50)  # Assuming 50Hz control
+    tdmpc2_cfg.work_dir = log_dir
     
-    # Import TDMPC2 components
-    from tdmpc2 import TDMPC2
-    from tdmpc2.common.buffer import Buffer
-    from tdmpc2.trainer.online_trainer import OnlineTrainer
-    from tdmpc2.common.logger import Logger
+    # Add wandb config if using wandb
+    if args.use_wandb:
+        tdmpc2_cfg.wandb_entity = args.wandb_entity
+        tdmpc2_cfg.enable_wandb = True
     
     # Setup TDMPC2
     agent = TDMPC2(tdmpc2_cfg)
@@ -389,7 +411,7 @@ def main():
     # Initialize trainer
     trainer = OnlineTrainer(
         cfg=tdmpc2_cfg,
-        env=wrapped_env,
+        env=zbot_env,
         agent=agent,
         buffer=buffer,
         logger=logger
