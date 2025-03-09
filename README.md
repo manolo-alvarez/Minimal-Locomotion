@@ -1,4 +1,9 @@
 ## First Time Setup
+Initialize the git submodules:
+```bash
+git submodule update --init --recursive
+```
+
 Create and configure the environment:
 ```bash
 conda env create -f environment.yml
@@ -33,6 +38,13 @@ To evaluate, analyze, and visualize the policy you've trained with the default p
 python genesis_playground/zbot/zbot_eval.py -e zbot-walking --analyze --show_viewer
 ```
 Checkout the available argument flags to configure the evaluation in main()
+
+## Real To Sim
+To run a policy in the `zbot_unit_test` repo, you'll need to convert the policy to an onnx model. 
+
+```bash
+python genesis_playground/zbot/export_model.py --input_dir <path_to_checkpoint_dir> --output_dir <path_to_output_dir> --checkpoint <checkpoint_number>
+```
 
 ## Debugging
 Use, change, or add to the `launch.json` configuration in the `.vscode` folder to debug your session in vscode. You can step, jump, watch, etc., with this function.
