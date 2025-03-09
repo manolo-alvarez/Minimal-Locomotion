@@ -43,3 +43,14 @@ setup(
         ],
     },
 )
+
+setup(
+    name="tdmpc2",
+    version="0.1.0",
+    packages=["tdmpc2"],
+    install_requires=[
+        "torch>=2.0.0",
+        "numpy",
+        "tensordict",
+    ],
+)
