@@ -1,3 +1,6 @@
 [submodule "zbot-unit-tests"]
 	path = zbot-unit-tests
 	url = https://github.com/kscalelabs/zbot-unit-tests.git
+[submodule "kos-sim"]
+	path = kos-sim
+	url = https://github.com/kscalelabs/kos-sim.git

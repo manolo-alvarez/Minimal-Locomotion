@@ -81,11 +81,11 @@ def convert_pt_to_onnx(pt_path, onnx_path, obs_dim=NUM_OBSERVATION_FEATURES):
         export_params=True,  # store the trained parameter weights inside the model file
         opset_version=12,    # the ONNX version to export the model to
         do_constant_folding=True,  # whether to execute constant folding for optimization
-        input_names=['input'],   # the model's input names
-        output_names=['output'],  # the model's output names
+        input_names=['obs'],   # the model's input names
+        output_names=['actions'],  # the model's output names
         dynamic_axes={
-            'input': {0: 'batch_size'},    # variable length axes
-            'output': {0: 'batch_size'}
+            'obs': {0: 'batch_size'},    # variable length axes
+            'actions': {0: 'batch_size'}
         }
     )
     
