@@ -106,6 +106,7 @@ def get_train_cfg(exp_name, max_iterations, device="mps"):
         "save_video": True,
         "save_agent": True,
         "seed": 1,
+        "seed_steps": 0, # Will be overridden
         "device": device,
         "compile": False,
         
@@ -304,6 +305,7 @@ def main():
     tdmpc2_cfg.action_dim = env_cfg["num_actions"]
     tdmpc2_cfg.episode_length = int(env_cfg["episode_length_s"] * 50)  # Assuming 50Hz control
     tdmpc2_cfg.work_dir = log_dir
+    tdmpc2_cfg.seed_steps = max(1000, 5*tdmpc2_cfg.episode_length)
     
     # Add wandb config if using wandb
     if args.use_wandb:
