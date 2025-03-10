@@ -610,7 +610,7 @@ def main():
                       help="Type of feature analysis to perform")
     parser.add_argument("--analysis_seeds", type=str, default="0",
                       help="Comma-separated list of random seeds for feature analysis (e.g., '0,42,123')")
-    parser.add_argument("--show_viewer", action="store_true", default=True,
+    parser.add_argument("--show_viewer", action="store_true", default=False,
                       help="Show the Genesis viewer")
     parser.add_argument("--log_dir", type=str, default="logs",
                       help="Directory to save logs")
@@ -650,6 +650,7 @@ def main():
         reward_cfg=reward_cfg,
         command_cfg=command_cfg,
         show_viewer=args.show_viewer,  # Set viewer directly
+        device = args.device
     )
     
     runner = OnPolicyRunner(env, train_cfg, log_dir, device=args.device)
