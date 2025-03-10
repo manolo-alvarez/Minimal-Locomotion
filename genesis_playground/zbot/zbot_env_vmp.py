@@ -4,8 +4,8 @@ import math
 import numpy as np
 import genesis as gs
 from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat
-from VMP import WalkingVAE  # Your existing VAE implementation
-from utils import load_walking_data  # Your existing data loader
+from VMP.VMP import WalkingVAE  # Your existing VAE implementation
+from VMP.utils import load_walking_data  # Your existing data loader
 from zbot_env import ZbotEnv
 import os
 from sklearn.preprocessing import RobustScaler

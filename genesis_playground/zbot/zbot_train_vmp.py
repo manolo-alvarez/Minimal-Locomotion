@@ -422,7 +422,7 @@ def main():
         show_viewer=args.show_viewer,
     )
 
-    # Save configs
+    # Save configs..
     pickle.dump(
         [env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg],
         open(f"{log_dir}/cfgs.pkl", "wb"),
