@@ -306,6 +306,7 @@ def main():
     tdmpc2_cfg.episode_length = int(env_cfg["episode_length_s"] * 50)  # Assuming 50Hz control
     tdmpc2_cfg.work_dir = log_dir
     tdmpc2_cfg.seed_steps = max(1000, 5*tdmpc2_cfg.episode_length)
+    tdmpc2_cfg.bin_size = (tdmpc2_cfg.vmax - tdmpc2_cfg.vmin) / (tdmpc2_cfg.num_bins-1)
     
     # Add wandb config if using wandb
     if args.use_wandb:

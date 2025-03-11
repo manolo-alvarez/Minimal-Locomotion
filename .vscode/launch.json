@@ -60,13 +60,14 @@
             "name": "Train TDMPC2 (mps)",
             "type": "debugpy",
             "request": "launch",
+            "justMyCode": true,
             "program": "genesis_playground/zbot/zbot_tdmpc2_train.py",
             "console": "integratedTerminal",
             "args": [
                 "-e", "zbot-tdmpc2", 
                 "--num_envs", "1",
                 "--device", "mps",
-                //"--use_wandb", "True"
+                "--use_wandb", "True"
             ]
         },
     ]
