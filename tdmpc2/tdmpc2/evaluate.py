@@ -9,9 +9,9 @@ import numpy as np
 import torch
 from termcolor import colored
 
-from common.parser import parse_cfg
-from common.seed import set_seed
-from envs import make_env
+from tdmpc2.common.parser import parse_cfg
+from tdmpc2.common.seed import set_seed
+from tdmpc2.envs import make_env
 from tdmpc2 import TDMPC2
 
 torch.backends.cudnn.benchmark = True
@@ -84,7 +84,7 @@ def evaluate(cfg: dict):
 				if cfg.save_video:
 					frames.append(env.render())
 			ep_rewards.append(ep_reward)
-			ep_successes.append(info['success'])
+			ep_successes.append(info['episode']['rew_tracking_lin_vel'])
 			if cfg.save_video:
 				imageio.mimsave(
 					os.path.join(video_dir, f'{task}-{i}.mp4'), frames, fps=15)

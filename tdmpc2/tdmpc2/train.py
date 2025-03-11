@@ -10,14 +10,14 @@ import torch
 import hydra
 from termcolor import colored
 
-from common.parser import parse_cfg
-from common.seed import set_seed
-from common.buffer import Buffer
-from envs import make_env
+from tdmpc2.common.parser import parse_cfg
+from tdmpc2.common.seed import set_seed
+from tdmpc2.common.buffer import Buffer
+from tdmpc2.envs import make_env
 from tdmpc2 import TDMPC2
-from trainer.offline_trainer import OfflineTrainer
-from trainer.online_trainer import OnlineTrainer
-from common.logger import Logger
+from tdmpc2.trainer.offline_trainer import OfflineTrainer
+from tdmpc2.trainer.online_trainer import OnlineTrainer
+from tdmpc2.common.logger import Logger
 
 torch.backends.cudnn.benchmark = True
 torch.set_float32_matmul_precision('high')
@@ -43,7 +43,7 @@ def train(cfg: dict):
 		$ python train.py task=dog-run steps=7000000
 	```
 	"""
-	assert torch.cuda.is_available()
+	assert torch.mps.is_available()
 	assert cfg.steps > 0, 'Must train for at least 1 step.'
 	cfg = parse_cfg(cfg)
 	set_seed(cfg.seed)

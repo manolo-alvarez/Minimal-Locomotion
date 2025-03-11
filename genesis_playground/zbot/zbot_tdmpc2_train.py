@@ -42,7 +42,7 @@ def get_train_cfg(exp_name, max_iterations, device="mps"):
         # evaluation
         "checkpoint": None,
         "eval_episodes": 10,
-        "eval_freq": 50000,
+        "eval_freq": 10000, #FIXME Original was 50000
         
         # training
         "steps": max_iterations * 48 * 100,  # Convert iterations to steps
@@ -317,38 +317,6 @@ def main():
     agent = TDMPC2(tdmpc2_cfg)
     buffer = Buffer(tdmpc2_cfg)
     logger = Logger(tdmpc2_cfg, tdmpc2_cfg_dict)
-    
-    # Create WandbLogger wrapper if using wandb
-    #if args.use_wandb:
-    #    class WandbLogger:
-    #        def __init__(self, original_logger):
-    #            self.logger = original_logger
-    #            
-    #        def log(self, info):
-    #            # Log with original logger
-    #            self.logger.log(info)
-    #            
-    #            # Log to wandb
-    #            wandb_metrics = {}
-    #            for k, v in info.items():
-    #                if isinstance(v, (int, float)):
-    #                    wandb_metrics[k] = v
-    #            wandb.log(wandb_metrics)
-    #    
-    #    wandb.init(
-    #        project=args.exp_name,
-    #        entity=args.wandb_entity,
-    #        name=f"{args.exp_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
-    #        config={
-    #            "env_cfg": env_cfg,
-    #            "obs_cfg": obs_cfg,
-    #            "reward_cfg": reward_cfg,
-    #            "command_cfg": command_cfg,
-    #            "tdmpc2_cfg": tdmpc2_cfg
-    #        }
-    #    )
-    #    
-    #    logger = WandbLogger(logger)
     
     # Initialize trainer
     trainer = OnlineTrainer(

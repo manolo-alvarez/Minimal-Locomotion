@@ -1,10 +1,10 @@
 import torch
 import torch.nn.functional as F
 
-from common import math
-from common.scale import RunningScale
-from common.world_model import WorldModel
-from common.layers import api_model_conversion
+from tdmpc2.common import math
+from tdmpc2.common.scale import RunningScale
+from tdmpc2.common.world_model import WorldModel
+from tdmpc2.common.layers import api_model_conversion
 from tensordict import TensorDict
 
 
@@ -18,7 +18,7 @@ class TDMPC2(torch.nn.Module):
 	def __init__(self, cfg):
 		super().__init__()
 		self.cfg = cfg
-		self.device = torch.device('cuda:0')
+		self.device = torch.device('mps')
 		self.model = WorldModel(cfg).to(self.device)
 		self.optim = torch.optim.Adam([
 			{'params': self.model._encoder.parameters(), 'lr': self.cfg.lr*self.cfg.enc_lr_scale},
@@ -27,13 +27,13 @@ class TDMPC2(torch.nn.Module):
 			{'params': self.model._Qs.parameters()},
 			{'params': self.model._task_emb.parameters() if self.cfg.multitask else []
 			 }
-		], lr=self.cfg.lr, capturable=True)
-		self.pi_optim = torch.optim.Adam(self.model._pi.parameters(), lr=self.cfg.lr, eps=1e-5, capturable=True)
+		], lr=self.cfg.lr, capturable=False)
+		self.pi_optim = torch.optim.Adam(self.model._pi.parameters(), lr=self.cfg.lr, eps=1e-5, capturable=False)
 		self.model.eval()
 		self.scale = RunningScale(cfg)
 		self.cfg.iterations += 2*int(cfg.action_dim >= 20) # Heuristic for large action spaces
 		self.discount = torch.tensor(
-			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='cuda:0'
+			[self._get_discount(ep_len) for ep_len in cfg.episode_lengths], device='mps'
 		) if self.cfg.multitask else self._get_discount(cfg.episode_length)
 		self._prev_mean = torch.nn.Buffer(torch.zeros(self.cfg.horizon, self.cfg.action_dim, device=self.device))
 		if cfg.compile:
@@ -106,16 +106,16 @@ class TDMPC2(torch.nn.Module):
 		Returns:
 			torch.Tensor: Action to take in the environment.
 		"""
-		obs = obs.to(self.device, non_blocking=True).unsqueeze(0)
+		obs = obs[0].to(self.device, non_blocking=True)
 		if task is not None:
 			task = torch.tensor([task], device=self.device)
 		if self.cfg.mpc:
-			return self.plan(obs, t0=t0, eval_mode=eval_mode, task=task).cpu()
+			return self.plan(obs, t0=t0, eval_mode=eval_mode, task=task)
 		z = self.model.encode(obs, task)
 		action, info = self.model.pi(z, task)
 		if eval_mode:
 			action = info["mean"]
-		return action[0].cpu()
+		return action[0]
 
 	@torch.no_grad()
 	def _estimate_value(self, z, actions, task):
@@ -192,7 +192,7 @@ class TDMPC2(torch.nn.Module):
 				std = std * self.model._action_masks[task]
 
 		# Select action
-		rand_idx = math.gumbel_softmax_sample(score.squeeze(1))  # gumbel_softmax_sample is compatible with cuda graphs
+		rand_idx = math.gumbel_softmax_sample(score.squeeze(1)).unsqueeze(0)  # gumbel_softmax_sample is compatible with cuda graphs
 		actions = torch.index_select(elite_actions, 1, rand_idx).squeeze(1)
 		a, std = actions[0], std[0]
 		if not eval_mode:

@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from termcolor import colored
 
-from common import TASK_SET
+from tdmpc2.common import TASK_SET
 
 
 CONSOLE_FORMAT = [
@@ -80,7 +80,7 @@ class VideoRecorder:
 
 	def __init__(self, cfg, wandb, fps=15):
 		self.cfg = cfg
-		self._save_dir = make_dir(cfg.work_dir / 'eval_video')
+		self._save_dir = make_dir(cfg.work_dir+'/eval_video')
 		self._wandb = wandb
 		self.fps = fps
 		self.frames = []
@@ -106,9 +106,9 @@ class VideoRecorder:
 class Logger:
 	"""Primary logging object. Logs either locally or using wandb."""
 
-	def __init__(self, cfg):
+	def __init__(self, cfg, cfg_dict):
 		self._log_dir = make_dir(cfg.work_dir)
-		self._model_dir = make_dir(self._log_dir / "models")
+		self._model_dir = make_dir(self._log_dir+"/models")
 		self._save_csv = cfg.save_csv
 		self._save_agent = cfg.save_agent
 		self._group = cfg_to_group(cfg)
@@ -134,7 +134,7 @@ class Logger:
 			group=self._group,
 			tags=cfg_to_group(cfg, return_list=True) + [f"seed:{cfg.seed}"],
 			dir=self._log_dir,
-			config=dataclasses.asdict(cfg),
+			config=cfg_dict
 		)
 		print(colored("Logs will be synced with wandb.", "blue", attrs=["bold"]))
 		self._wandb = wandb
@@ -154,7 +154,7 @@ class Logger:
 
 	def save_agent(self, agent=None, identifier='final'):
 		if self._save_agent and agent:
-			fp = self._model_dir / f'{str(identifier)}.pt'
+			fp = self._model_dir + f'{str(identifier)}.pt'
 			agent.save(fp)
 			if self._wandb:
 				artifact = self._wandb.Artifact(
@@ -236,6 +236,6 @@ class Logger:
 			keys = ["step", "episode_reward"]
 			self._eval.append(np.array([d[keys[0]], d[keys[1]]]))
 			pd.DataFrame(np.array(self._eval)).to_csv(
-				self._log_dir / "eval.csv", header=keys, index=None
+				self._log_dir+"/eval.csv", header=keys, index=None
 			)
 		self._print(d, category)

@@ -3,7 +3,8 @@ from time import time
 import numpy as np
 import torch
 from tensordict.tensordict import TensorDict
-from trainer.base import Trainer
+from tdmpc2.trainer.base import Trainer
+import gym
 
 
 class OnlineTrainer(Trainer):
@@ -14,6 +15,9 @@ class OnlineTrainer(Trainer):
 		self._step = 0
 		self._ep_idx = 0
 		self._start_time = time()
+		self.action_space = gym.spaces.Box(
+			low=-1, high=1, shape=(self.env.num_actions,), dtype=np.float32
+		)
 
 	def common_metrics(self):
 		"""Return a dictionary of current metrics."""
@@ -29,38 +33,38 @@ class OnlineTrainer(Trainer):
 		for i in range(self.cfg.eval_episodes):
 			obs, done, ep_reward, t = self.env.reset(), False, 0, 0
 			if self.cfg.save_video:
-				self.logger.video.init(self.env, enabled=(i==0))
+				self.logger.video.init(self.env, enabled=False) # have to disable for now since Genesis rendering is difficult
 			while not done:
 				torch.compiler.cudagraph_mark_step_begin()
 				action = self.agent.act(obs, t0=t==0, eval_mode=True)
-				obs, reward, done, info = self.env.step(action)
+				obs, reward, done, info = self.env.step(action.unsqueeze(0))
 				ep_reward += reward
 				t += 1
 				if self.cfg.save_video:
 					self.logger.video.record(self.env)
-			ep_rewards.append(ep_reward)
-			ep_successes.append(info['success'])
+			ep_rewards.append(ep_reward.cpu())
+			ep_successes.append(info['episode']['rew_tracking_lin_vel'])
 			if self.cfg.save_video:
 				self.logger.video.save(self._step)
 		return dict(
 			episode_reward=np.nanmean(ep_rewards),
-			episode_success=np.nanmean(ep_successes),
+			#episode_success=np.nanmean(ep_successes),
 		)
 
 	def to_td(self, obs, action=None, reward=None):
 		"""Creates a TensorDict for a new episode."""
-		if isinstance(obs, dict):
-			obs = TensorDict(obs, batch_size=(), device='cpu')
+		if isinstance(obs, tuple):
+			obs = obs[0]
 		else:
-			obs = obs.unsqueeze(0).cpu()
+			obs = obs
 		if action is None:
-			action = torch.full_like(self.env.rand_act(), float('nan'))
+			action = torch.full_like(torch.from_numpy(self.action_space.sample().astype(np.float32)).to('mps').unsqueeze(0), float(0))
 		if reward is None:
-			reward = torch.tensor(float('nan'))
+			reward = torch.tensor(float(0)).to('mps').unsqueeze(0)
 		td = TensorDict(
 			obs=obs,
-			action=action.unsqueeze(0),
-			reward=reward.unsqueeze(0),
+			action=action,
+			reward=reward,
 		batch_size=(1,))
 		return td
 
@@ -71,6 +75,7 @@ class OnlineTrainer(Trainer):
 			# Evaluate agent periodically
 			if self._step % self.cfg.eval_freq == 0:
 				eval_next = True
+				self.logger.save_agent(self.agent, identifier=f'{self._step}')
 
 			# Reset environment
 			if done:
@@ -83,7 +88,7 @@ class OnlineTrainer(Trainer):
 				if self._step > 0:
 					train_metrics.update(
 						episode_reward=torch.tensor([td['reward'] for td in self._tds[1:]]).sum(),
-						episode_success=info['success'],
+						#episode_success=info['episode']['rew_tracking_lin_vel'],
 					)
 					train_metrics.update(self.common_metrics())
 					self.logger.log(train_metrics, 'train')
@@ -94,9 +99,9 @@ class OnlineTrainer(Trainer):
 
 			# Collect experience
 			if self._step > self.cfg.seed_steps:
-				action = self.agent.act(obs, t0=len(self._tds)==1)
+				action = self.agent.act(obs, t0=len(self._tds)==1).to('mps').unsqueeze(0)
 			else:
-				action = self.env.rand_act()
+				action = torch.from_numpy(self.action_space.sample().astype(np.float32)).to('mps').unsqueeze(0)
 			obs, reward, done, info = self.env.step(action)
 			self._tds.append(self.to_td(obs, action, reward))
 
