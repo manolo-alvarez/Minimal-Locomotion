@@ -33,7 +33,7 @@
             ]
         },
         {
-            "name": "zbot_train (mps)",
+            "name": "Train PPO (mps)",
             "type": "debugpy",
             "request": "launch",
             "program": "genesis_playground/zbot/zbot_train.py",
@@ -45,7 +45,7 @@
             ]
         },
         {
-            "name": "zbot_train (cuda)",
+            "name": "Train PPO (cuda)",
             "type": "debugpy",
             "request": "launch",
             "program": "genesis_playground/zbot/zbot_train",
@@ -55,6 +55,20 @@
                 "--num_envs", "4096",
                 "--device", "cuda"
             ]
-        }
+        },
+        {
+            "name": "Train TDMPC2 (mps)",
+            "type": "debugpy",
+            "request": "launch",
+            "justMyCode": true,
+            "program": "genesis_playground/zbot/zbot_tdmpc2_train.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-e", "zbot-tdmpc2", 
+                "--num_envs", "1",
+                "--device", "mps",
+                "--use_wandb", "True"
+            ]
+        },
     ]
 }
