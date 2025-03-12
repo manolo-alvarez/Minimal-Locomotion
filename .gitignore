@@ -1,4 +1,4 @@
-logs/
+logs/*
 *__*
 results/
 .DS_Store
