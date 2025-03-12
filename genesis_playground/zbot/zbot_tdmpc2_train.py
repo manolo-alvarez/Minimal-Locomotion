@@ -20,12 +20,12 @@ import genesis as gs
 import sys
 import os
 
-from tdmpc2.trainer.online_trainer import OnlineTrainer
+from trainer.online_trainer import OnlineTrainer
 import torch
 import numpy as np
 from tdmpc2 import TDMPC2
-from tdmpc2.common.buffer import Buffer
-from tdmpc2.common.logger import Logger
+from common.buffer import Buffer
+from common.logger import Logger
 
 def get_train_cfg(exp_name, max_iterations, device="mps"):
     """
