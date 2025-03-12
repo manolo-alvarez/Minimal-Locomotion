@@ -77,7 +77,6 @@ dependencies:
       - freetype-py==2.5.1
       - frozenlist==1.5.0
       - fsspec==2025.2.0
-      - genesis-playground==0.1.0
       - genesis-world==0.2.1
       - gitdb==4.0.12
       - gitpython==3.1.44
