@@ -277,11 +277,11 @@ def main():
     gs.init(logging_level="warning")
 
     log_dir = f"{args.log_dir}/{args.exp_name}"
+
     env_cfg, obs_cfg, reward_cfg, command_cfg = get_env_cfg()
     
     if not args.from_checkpoint:
-        if os.path.exists(log_dir):
-            shutil.rmtree(log_dir)
+        assert not os.path.exists(log_dir), f'This directory already exists, either remove it or change the name of the experiment'
         os.makedirs(log_dir, exist_ok=True)
 
     # Create Genesis ZBot environment

@@ -49,7 +49,7 @@
             "name": "Train PPO (cuda)",
             "type": "debugpy",
             "request": "launch",
-            "program": "genesis_playground/zbot/zbot_train",
+            "program": "genesis_playground/zbot/zbot_train_ppo.py",
             "console": "integratedTerminal",
             "args": [
                 "-e", "zbot-walking", 
@@ -62,7 +62,7 @@
             "type": "debugpy",
             "request": "launch",
             "justMyCode": true,
-            "program": "genesis_playground/zbot/zbot_tdmpc2_train.py",
+            "program": "genesis_playground/zbot/zbot_train_tdmpc2.py",
             "console": "integratedTerminal",
             "args": [
                 "-e", "zbot-tdmpc2_test", 
@@ -76,7 +76,7 @@
             "name": "Eval TDMPC2 (mps)",
             "type": "debugpy",
             "request": "launch",
-            "program": "genesis_playground/zbot/zbot_eval.py",
+            "program": "genesis_playground/zbot/zbot_eval_tdmpc2.py",
             "console": "integratedTerminal",
             "args": [
                 "-e", "zbot-tdmpc2_2", 
