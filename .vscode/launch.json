@@ -11,8 +11,8 @@
             "program": "genesis_playground/zbot/zbot_eval.py",
             "console": "integratedTerminal",
             "args": [
-                "-e", "zbot-walking", 
-                "--ckpt", "299", 
+                "-e", "zbot-tdmpc2_2", 
+                "--ckpt", "60000", 
                 "--device", "mps", 
                 "--analyze", 
                 "--show_viewer"
@@ -39,9 +39,10 @@
             "program": "genesis_playground/zbot/zbot_train.py",
             "console": "integratedTerminal",
             "args": [
-                "-e", "zbot-walking", 
-                "--num_envs", "4096",
-                "--device", "mps"
+                "-e", "zbot-walking_2", 
+                "--num_envs", "1",
+                "--device", "mps",
+                "--show_viewer", "True"
             ]
         },
         {
@@ -64,10 +65,24 @@
             "program": "genesis_playground/zbot/zbot_tdmpc2_train.py",
             "console": "integratedTerminal",
             "args": [
-                "-e", "zbot-tdmpc2", 
+                "-e", "zbot-tdmpc2_test", 
                 "--num_envs", "1",
                 "--device", "mps",
-                "--use_wandb", "True"
+                "--use_wandb", "False",
+                "--show_viewer", "True"
+            ]
+        },
+        {
+            "name": "Eval TDMPC2 (mps)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "genesis_playground/zbot/zbot_eval.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-e", "zbot-tdmpc2_2", 
+                "--ckpt", "60000", 
+                "--device", "mps",
+                "--show_viewer"
             ]
         },
     ]
