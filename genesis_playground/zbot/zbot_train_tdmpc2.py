@@ -96,7 +96,7 @@ def get_train_cfg(exp_name, max_iterations, device="mps"):
         "simnorm_dim": 8,
         
         # logging
-        "wandb_project": exp_name,
+        "wandb_project": "TDMPC2",
         "wandb_entity": None,
         "wandb_silent": False,
         "enable_wandb": False,  # We'll handle wandb separately
