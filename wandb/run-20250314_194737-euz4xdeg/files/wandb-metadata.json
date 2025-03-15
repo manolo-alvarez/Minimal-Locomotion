@@ -1,0 +1,51 @@
+{
+  "os":  "macOS-15.3.2-arm64-arm-64bit",
+  "python":  "CPython 3.11.0",
+  "startedAt":  "2025-03-15T02:47:37.508723Z",
+  "args":  [
+    "-e",
+    "zbot-ppo-v2_1",
+    "--max_iterations",
+    "1000",
+    "--use_wandb",
+    "True"
+  ],
+  "program":  "/Users/manoloalvarez/playground/Minimal-Locomotion/genesis_playground/zbot/zbot_train_ppo.py",
+  "codePath":  "genesis_playground/zbot/zbot_train_ppo.py",
+  "git":  {
+    "remote":  "https://github.com/manolo-alvarez/Minimal-Locomotion.git",
+    "commit":  "1346e5b435282ee8f9fa8ff6bf30f2097f8216cd"
+  },
+  "email":  "manolo.alvarezc@outlook.com",
+  "root":  "/Users/manoloalvarez/playground/Minimal-Locomotion",
+  "host":  "DN0a22613c.SUNet",
+  "executable":  "/Users/manoloalvarez/miniforge3/envs/minimal_walking/bin/python",
+  "codePathLocal":  "genesis_playground/zbot/zbot_train_ppo.py",
+  "cpu_count":  10,
+  "cpu_count_logical":  10,
+  "disk":  {
+    "/":  {
+      "total":  "994662584320",
+      "used":  "415047049216"
+    },
+    "/System/Volumes/Data":  {
+      "total":  "994662584320",
+      "used":  "415047049216"
+    }
+  },
+  "memory":  {
+    "total":  "68719476736"
+  },
+  "cpu":  {
+    "count":  10,
+    "countLogical":  10
+  },
+  "apple":  {
+    "name":  "Apple M1 Max",
+    "ecpuCores":  2,
+    "pcpuCores":  8,
+    "gpuCores":  32,
+    "memoryGb":  64,
+    "ramTotalBytes":  "68719476736"
+  }
+}

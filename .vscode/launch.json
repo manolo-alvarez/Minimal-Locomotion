@@ -33,16 +33,16 @@
             ]
         },
         {
-            "name": "Train PPO (mps)",
+            "name": "Train PPO v1 (mps)",
             "type": "debugpy",
             "request": "launch",
-            "program": "genesis_playground/zbot/zbot_train.py",
+            "program": "genesis_playground/zbot/zbot_train_ppo.py",
             "console": "integratedTerminal",
             "args": [
-                "-e", "zbot-walking_2", 
-                "--num_envs", "1",
-                "--device", "mps",
-                "--show_viewer", "True"
+                "-e", "zbot-ppo-v1_2", 
+                "--num_envs", "4096",
+                "--use_wandb", "True",
+                "--max_iterations", "1000"
             ]
         },
         {
@@ -83,6 +83,19 @@
                 "--ckpt", "160000", 
                 "--device", "mps",
                 "--show_viewer"
+            ]
+        },
+        {
+            "name": "Train PPO v2 (mps)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "genesis_playground/zbot/zbot_train_ppo_v2.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-e", "zbot-ppo-v2_1", 
+                "--num_envs", "4096",
+                "--use_wandb", "True",
+                "--max_iterations", "1000"
             ]
         },
     ]

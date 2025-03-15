@@ -1,0 +1,178 @@
+_wandb:
+    value:
+        cli_version: 0.19.7.dev1
+        m: []
+        python_version: 3.11.0
+        t:
+            "1":
+                - 1
+                - 55
+                - 105
+            "2":
+                - 1
+                - 55
+                - 105
+            "3":
+                - 2
+                - 13
+                - 16
+                - 23
+                - 55
+            "4": 3.11.0
+            "5": 0.19.7.dev1
+            "8":
+                - 5
+            "12": 0.19.7.dev1
+            "13": darwin-arm64
+command_cfg:
+    value:
+        ang_vel_range:
+            - -0.4
+            - 0.4
+        lin_vel_x_range:
+            - -0.2
+            - 0.4
+        lin_vel_y_range:
+            - 0
+            - 0
+        num_commands: 3
+device:
+    value: mps
+env_cfg:
+    value:
+        action_scale: 0.25
+        base_init_pos:
+            - 0
+            - 0
+            - 0.41
+        base_init_quat:
+            - 1
+            - 0
+            - 0
+            - 0
+        clip_actions: 100
+        default_joint_angles:
+            L_Ankle_Pitch: 0
+            L_Hip_Pitch: 0
+            L_Hip_Roll: 0
+            L_Hip_Yaw: 0
+            L_Knee_Pitch: 0
+            R_Ankle_Pitch: 0
+            R_Hip_Pitch: 0
+            R_Hip_Roll: 0
+            R_Hip_Yaw: 0
+            R_Knee_Pitch: 0
+        dof_names:
+            - R_Hip_Pitch
+            - L_Hip_Pitch
+            - R_Hip_Yaw
+            - L_Hip_Yaw
+            - R_Hip_Roll
+            - L_Hip_Roll
+            - R_Knee_Pitch
+            - L_Knee_Pitch
+            - R_Ankle_Pitch
+            - L_Ankle_Pitch
+        env_friction_range:
+            end:
+                - 0.9
+                - 1.1
+            start:
+                - 0.9
+                - 1.1
+        episode_length_s: 20
+        kd: 0.5
+        kd_multipliers:
+            - 0.75
+            - 1.25
+        kp: 20
+        kp_multipliers:
+            - 0.75
+            - 1.25
+        link_mass_multipliers:
+            end:
+                - 1
+                - 1
+            start:
+                - 1
+                - 1
+        max_torque: 10
+        num_actions: 10
+        resampling_time_s: 4
+        rfi_scale: 0.1
+        simulate_action_latency: true
+        termination_if_pitch_greater_than: 10
+        termination_if_roll_greater_than: 10
+max_iterations:
+    value: 1000
+num_envs:
+    value: 4096
+obs_cfg:
+    value:
+        num_obs: 39
+        obs_exclusions: []
+        obs_scales:
+            ang_vel: 0.25
+            dof_pos: 1
+            dof_vel: 0.05
+            lin_vel: 2
+reward_cfg:
+    value:
+        base_height_target: 0.3
+        feet_height_target: 0.075
+        reward_scales:
+            action_rate: -0.0001
+            base_height: -1
+            feet_air_time: 0.1
+            lin_vel_z: -0.02
+            similar_to_default: -0.002
+            tracking_ang_vel: 0.004
+            tracking_lin_vel: 0.02
+        tracking_sigma: 0.25
+train_cfg:
+    value:
+        algorithm:
+            class_name: PPO
+            clip_param: 0.2
+            desired_kl: 0.01
+            entropy_coef: 0.01
+            gamma: 0.99
+            lam: 0.95
+            learning_rate: 0.001
+            max_grad_norm: 1
+            num_learning_epochs: 5
+            num_mini_batches: 4
+            schedule: adaptive
+            use_clipped_value_loss: true
+            value_loss_coef: 1
+        empirical_normalization: false
+        num_steps_per_env: 48
+        policy:
+            activation: elu
+            actor_hidden_dims:
+                - 512
+                - 256
+                - 128
+            class_name: ActorCritic
+            critic_hidden_dims:
+                - 512
+                - 256
+                - 128
+            init_noise_std: 1
+        runner:
+            algorithm_class_name: PPO
+            checkpoint: -1
+            experiment_name: zbot-ppo-v1_1
+            load_run: -1
+            log_interval: 1
+            max_iterations: 1000
+            num_steps_per_env: 48
+            policy_class_name: ActorCritic
+            record_interval: -1
+            resume: false
+            resume_path: null
+            run_name: ""
+            runner_class_name: OnPolicyRunner
+        runner_class_name: OnPolicyRunner
+        save_interval: 100
+        seed: 1

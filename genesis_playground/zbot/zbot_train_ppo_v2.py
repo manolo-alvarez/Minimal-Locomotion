@@ -12,7 +12,7 @@ import shutil
 import wandb
 from datetime import datetime
 
-from zbot_env import ZbotEnv
+from zbot_env_v2 import ZbotEnv2
 from rsl_rl.runners import OnPolicyRunner
 
 import genesis as gs
@@ -83,28 +83,28 @@ def get_cfgs():
         # joint/link names
         # NOTE: hip roll/yaw flipped between sim & real robot FIXME
         "default_joint_angles": {  # [rad]
-            "R_Hip_Pitch": 0.0,
-            "L_Hip_Pitch": 0.0,
-            "R_Hip_Yaw": 0.0,
-            "L_Hip_Yaw": 0.0,
-            "R_Hip_Roll": 0.0,
-            "L_Hip_Roll": 0.0,
-            "R_Knee_Pitch": 0.0,
-            "L_Knee_Pitch": 0.0,
-            "R_Ankle_Pitch": 0.0,
-            "L_Ankle_Pitch": 0.0,
+            "right_hip_pitch": 0.0,
+            "left_hip_pitch": 0.0,
+            "right_hip_yaw": 0.0,
+            "left_hip_yaw": 0.0,
+            "right_hip_roll": 0.0,
+            "left_hip_roll": 0.0,
+            "right_knee": 0.0,
+            "left_knee": 0.0,
+            "right_ankle": 0.0,
+            "left_ankle": 0.0,
         },
         "dof_names": [
-            "R_Hip_Pitch",
-            "L_Hip_Pitch",
-            "R_Hip_Yaw",
-            "L_Hip_Yaw",
-            "R_Hip_Roll",
-            "L_Hip_Roll",
-            "R_Knee_Pitch",
-            "L_Knee_Pitch",
-            "R_Ankle_Pitch",
-            "L_Ankle_Pitch",
+            "right_hip_pitch",
+            "left_hip_pitch",
+            "right_hip_yaw",
+            "left_hip_yaw",
+            "right_hip_roll",
+            "left_hip_roll",
+            "right_knee",
+            "left_knee",
+            "right_ankle",
+            "left_ankle",
         ],
         # friction
         "env_friction_range": {
@@ -219,7 +219,7 @@ def main():
             shutil.rmtree(log_dir)
         os.makedirs(log_dir, exist_ok=True)
 
-    env = ZbotEnv(
+    env = ZbotEnv2(
         num_envs=args.num_envs, 
         env_cfg=env_cfg, 
         obs_cfg=obs_cfg, 
