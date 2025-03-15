@@ -47,7 +47,7 @@ def get_train_cfg(exp_name, max_iterations, device="mps"):
         # training
         "steps": max_iterations * 48 * 100,  # Convert iterations to steps
         "batch_size": 256,
-        "reward_coef": 300,
+        "reward_coef": 3,
         "value_coef": 3,
         "consistency_coef": 600,
         "rho": 0.5,
@@ -99,7 +99,7 @@ def get_train_cfg(exp_name, max_iterations, device="mps"):
         "wandb_project": "TDMPC2",
         "wandb_entity": None,
         "wandb_silent": False,
-        "enable_wandb": False,  # We'll handle wandb separately
+        "enable_wandb": True,  # We'll handle wandb separately
         "save_csv": True,
         
         # misc
@@ -269,7 +269,7 @@ def main():
     parser.add_argument("--device", type=str, default="mps")
     parser.add_argument("--show_viewer", type=bool, default=False)
     parser.add_argument("--wandb_entity", type=str, default=None)
-    parser.add_argument("--use_wandb", type=bool, default=False)
+    parser.add_argument("--use_wandb", type=bool, default=True)
     parser.add_argument("--from_checkpoint", type=bool, default=False)
     parser.add_argument("--log_dir", type=str, default="logs")
     args = parser.parse_args()

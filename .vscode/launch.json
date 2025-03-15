@@ -79,8 +79,8 @@
             "program": "genesis_playground/zbot/zbot_eval_tdmpc2.py",
             "console": "integratedTerminal",
             "args": [
-                "-e", "zbot-tdmpc2_2", 
-                "--ckpt", "60000", 
+                "-e", "zbot-tdmpc2_5", 
+                "--ckpt", "160000", 
                 "--device", "mps",
                 "--show_viewer"
             ]

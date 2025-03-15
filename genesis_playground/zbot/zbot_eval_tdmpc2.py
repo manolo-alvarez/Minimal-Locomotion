@@ -604,7 +604,7 @@ def collect_observations_with_fixed_command(env, policy, command=None, num_sampl
             action = policy(obs_copy)
         
         # Step environment
-        result = env.step(action)
+        result = env.step(action.unsqueeze(0))
         
         # Handle different return formats
         if len(result) == 4:
@@ -741,7 +741,7 @@ def main():
                       help="Directory to save logs")
     parser.add_argument("--save_results", action="store_true", default=False,
                       help="Save results to wandb")
-    parser.add_argument("--num_rollouts", type=int, default=10,
+    parser.add_argument("--num_rollouts", type=int, default=1,
                       help="Number of rollouts to evaluate")
     parser.add_argument("--random_commands", action="store_true", default=False,
                       help="Use random commands for evaluation")
@@ -792,7 +792,7 @@ def main():
     tdmpc2_cfg.bin_size = (tdmpc2_cfg.vmax - tdmpc2_cfg.vmin) / (tdmpc2_cfg.num_bins-1)
 
     agent = TDMPC2(tdmpc2_cfg)
-    resume_path = os.path.join(log_dir, f"models{args.ckpt}.pt")
+    resume_path = os.path.join(log_dir, f"models/{args.ckpt}.pt")
     assert os.path.exists(resume_path), f'Checkpoint {resume_path} not found! Must be a valid filepath.'
     agent.load(resume_path)
     policy = agent.act
@@ -823,7 +823,7 @@ def main():
                 from policy_analyzer import analyze_with_multiple_seeds
                 analyzer = analyze_with_multiple_seeds(
                     env, 
-                    runner, 
+                    policy, 
                     save_dir=save_dir,
                     num_samples=args.analysis_samples,
                     seeds=seeds,
@@ -834,7 +834,7 @@ def main():
                 from policy_analyzer import analyze_policy
                 analyzer = analyze_policy(
                     env, 
-                    runner, 
+                    policy, 
                     save_dir=save_dir,
                     num_samples=args.analysis_samples,
                     device=args.device,
@@ -845,7 +845,6 @@ def main():
             print("Running robust feature analysis across multiple base points...")
             seed_value = int(seeds[0])  # Just use the first seed for robust analysis
             
-            policy = runner.get_inference_policy(device=args.device)
             analyzer = PolicyAnalyzer(
                 policy=policy,
                 obs_labels=env.get_observation_labels(),
@@ -881,7 +880,7 @@ def main():
         
         elif args.analysis_type == "phase_aware":
             print("Running phase-aware feature analysis across gait cycles...")
-            policy = runner.get_inference_policy(device=args.device)
+            policy = policy.act
             analyzer = PolicyAnalyzer(
                 policy=policy,
                 obs_labels=env.get_observation_labels(),
