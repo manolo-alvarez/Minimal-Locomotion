@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import pygame 
 from zbot_env import ZbotEnv
+from zbot_env_v2 import ZbotEnv2
 from rsl_rl.runners import OnPolicyRunner
 from policy_analyzer import PolicyAnalyzer  # Add this import at the module level
 import random
@@ -620,6 +621,8 @@ def main():
                       help="Number of rollouts to evaluate")
     parser.add_argument("--random_commands", action="store_true", default=False,
                       help="Use random commands for evaluation")
+    parser.add_argument("--urdf_ver", type=str, default="v1",
+                      help="Use random commands for evaluation")
     args = parser.parse_args()
 
     gs.init()
@@ -643,15 +646,26 @@ def main():
     }
 
     # Create environment with show_viewer=True directly
-    env = ZbotEnv(
-        num_envs=1,
-        env_cfg=env_cfg,
-        obs_cfg=obs_cfg,
-        reward_cfg=reward_cfg,
-        command_cfg=command_cfg,
-        show_viewer=args.show_viewer,  # Set viewer directly
-        device = args.device
-    )
+    if args.urdf_ver == "v1":    
+        env = ZbotEnv(
+            num_envs=1,
+            env_cfg=env_cfg,
+            obs_cfg=obs_cfg,
+            reward_cfg=reward_cfg,
+            command_cfg=command_cfg,
+            show_viewer=args.show_viewer,  # Set viewer directly
+            device = args.device
+        )
+    else:
+        env = ZbotEnv2(
+            num_envs=1,
+            env_cfg=env_cfg,
+            obs_cfg=obs_cfg,
+            reward_cfg=reward_cfg,
+            command_cfg=command_cfg,
+            show_viewer=args.show_viewer,  # Set viewer directly
+            device = args.device
+        )
     
     runner = OnPolicyRunner(env, train_cfg, log_dir, device=args.device)
     resume_path = os.path.join(log_dir, f"model_{args.ckpt}.pt")
