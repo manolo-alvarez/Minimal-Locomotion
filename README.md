@@ -1,7 +1,7 @@
 ## First Time Setup
 Initialize the git submodules:
 ```bash
-git submodule update --init --recursive
+git submodule update --init --recursive --remote
 ```
 Set channel priority to flexible to resolve package conflicts
 ``` bash
