@@ -98,5 +98,29 @@
                 "--max_iterations", "1000"
             ]
         },
+        {
+            "name": "kos-sim",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "kos-sim-cs234/examples/zbot/walking.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--model", "/Users/manoloalvarez/playground/Minimal-Locomotion/kos-sim-cs234/assets/models/model_300.onnx",
+                "--debug"
+            ]
+        },
+        {
+            "name": "Export PPO",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "genesis_playground/zbot/export_model.py",
+            "console": "integratedTerminal",
+            "args": [
+                "--input_dir", "logs/zbot-ppo-v2_1", 
+                "--output_dir", "zbot-ppo-v2_1",
+                "--checkpoint", "300"
+        ]
+        },
     ]
 }
