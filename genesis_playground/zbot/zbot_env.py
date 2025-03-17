@@ -4,7 +4,7 @@ import math
 import numpy as np
 import genesis as gs
 from genesis.utils.geom import quat_to_xyz, transform_by_quat, inv_quat, transform_quat_by_quat
-
+from collections import deque
 
 def gs_rand_float(lower, upper, shape, device):
     return (upper - lower) * torch.rand(size=shape, device=device) + lower
@@ -110,9 +110,12 @@ class ZbotEnv:
         self.base_init_pos = torch.tensor(self.env_cfg["base_init_pos"], device=self.device)
         self.base_init_quat = torch.tensor(self.env_cfg["base_init_quat"], device=self.device)
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
+        old_urdf ="genesis_playground/resources/zbot/robot_fixed.urdf"
+        new_urdf = "genesis_playground/resources/zbot_new/robot.urdf"
+
         self.robot = self.scene.add_entity(
             gs.morphs.URDF(
-                file="genesis_playground/resources/zbot_new/robot.urdf",
+                file=new_urdf,
                 pos=self.base_init_pos.cpu().numpy(),
                 quat=self.base_init_quat.cpu().numpy(),
             ),
@@ -149,7 +152,10 @@ class ZbotEnv:
                                          device=self.device, dtype=torch.float)
         
         self.base_lin_vel = torch.zeros((self.num_envs, 3), device=self.device, dtype=gs.tc_float)
+        self.base_lin_vel_moving_avg = torch.zeros_like(self.base_lin_vel, device=self.device, dtype=gs.tc_float)
         self.base_ang_vel = torch.zeros((self.num_envs, 3), device=self.device, dtype=gs.tc_float)
+        self.base_ang_vel_moving_avg = torch.zeros_like(self.base_ang_vel, device=self.device, dtype=gs.tc_float)
+        
         self.projected_gravity = torch.zeros((self.num_envs, 3), device=self.device, dtype=gs.tc_float)
         self.global_gravity = torch.tensor([0.0, 0.0, -1.0], device=self.device, dtype=gs.tc_float).repeat(
             self.num_envs, 1
@@ -183,6 +189,7 @@ class ZbotEnv:
             dtype=gs.tc_float,
         )
         self.extras = dict()  # extra information for logging
+        #self.reset()
 
     def _resample_commands(self, envs_idx):
         self.commands[envs_idx, 0] = gs_rand_float(*self.command_cfg["lin_vel_x_range"], (len(envs_idx),), self.device)
@@ -239,9 +246,26 @@ class ZbotEnv:
         inv_base_quat = inv_quat(self.base_quat)
         self.base_lin_vel[:] = transform_by_quat(self.robot.get_vel(), inv_base_quat)
         self.base_ang_vel[:] = transform_by_quat(self.robot.get_ang(), inv_base_quat)
+        
+        # For first step in episode, initialize moving averages to current velocities
+        first_step_mask = (self.episode_length_buf == 1)
+        
+        # Update moving averages with exponential filter
+        self.base_lin_vel_moving_avg[:] = self.base_lin_vel_moving_avg * (1 - self.reward_cfg["lin_vel_moving_avg_alpha"]) + self.base_lin_vel * self.reward_cfg["lin_vel_moving_avg_alpha"]
+        self.base_ang_vel_moving_avg[:] = self.base_ang_vel_moving_avg * (1 - self.reward_cfg["ang_vel_moving_avg_alpha"]) + self.base_ang_vel * self.reward_cfg["ang_vel_moving_avg_alpha"]
+        
+        # For first step, directly set moving averages to current velocities
+        if first_step_mask.any():
+            self.base_lin_vel_moving_avg[first_step_mask] = self.base_lin_vel[first_step_mask]
+            self.base_ang_vel_moving_avg[first_step_mask] = self.base_ang_vel[first_step_mask]
+
+        self.commands[0] = torch.tensor([0.05, 0.0, 0.0], device=self.device, dtype=gs.tc_float)
+        
         self.projected_gravity = transform_by_quat(self.global_gravity, inv_base_quat)
         self.dof_pos[:] = self.robot.get_dofs_position(self.motor_dofs)
         self.dof_vel[:] = self.robot.get_dofs_velocity(self.motor_dofs)
+
+
 
         # resample commands
         envs_idx = (
@@ -366,9 +390,32 @@ class ZbotEnv:
         for link in self.robot.links:
             link.set_mass(link.get_mass() * link_mass_mult)
 
-        # reset dofs
-        self.dof_pos[envs_idx] = self.default_dof_pos
+        # reset dofs - with random chance of random starting positions
+        if torch.rand(1).item() < self.env_cfg["random_start_chance"]:
+            # For each joint, sample a random position within its limits
+            num_envs_to_reset = len(envs_idx)
+            
+            # Start with default positions for all joints
+            random_dof_pos = self.default_dof_pos.clone().unsqueeze(0).repeat(num_envs_to_reset, 1)
+            
+            # For each joint with limits, replace with random values
+            for i, dof_name in enumerate(self.env_cfg["dof_names"]):
+                if dof_name in self.env_cfg["joint_limits"]:
+                    lower, upper = self.env_cfg["joint_limits"][dof_name]
+                    # Vectorized sampling for all environments at once
+                    random_pos = torch.rand(num_envs_to_reset, device=self.device) * (upper - lower) + lower
+                    random_dof_pos[:, i] = random_pos
+            
+            # Assign the random positions to the environments being reset
+            self.dof_pos[envs_idx] = random_dof_pos
+        else:
+            # Use default positions
+            self.dof_pos[envs_idx] = self.default_dof_pos
+        
+        # Always reset velocities to zero
         self.dof_vel[envs_idx] = 0.0
+
+        # clip dof pos to joint limits
         self.robot.set_dofs_position(
             position=self.dof_pos[envs_idx],
             dofs_idx_local=self.motor_dofs,
@@ -383,6 +430,8 @@ class ZbotEnv:
         self.robot.set_quat(self.base_quat[envs_idx], zero_velocity=False, envs_idx=envs_idx)
         self.base_lin_vel[envs_idx] = 0
         self.base_ang_vel[envs_idx] = 0
+        self.base_lin_vel_moving_avg[envs_idx] = 0
+        self.base_ang_vel_moving_avg[envs_idx] = 0
         self.robot.zero_all_dofs_velocity(envs_idx)
 
         # reset buffers
@@ -417,13 +466,58 @@ class ZbotEnv:
     # terms of the reward function or add our own pretty easily here
 
     def _reward_tracking_lin_vel(self):
+        if self.reward_cfg["use_old_rewards"]:
+            lin_vel_error = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
+            return torch.exp(-lin_vel_error / self.reward_cfg["tracking_sigma"])
+
         # Tracking of linear velocity commands (xy axes)
-        lin_vel_error = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
-        return torch.exp(-lin_vel_error / self.reward_cfg["tracking_sigma"])
+        if self.reward_cfg["moving_avg_for_lin_vel_tacking"]:
+            vel = self.base_lin_vel_moving_avg[:, :2]
+        else:
+            vel = self.base_lin_vel[:, :2]
+        
+        # Get command magnitude for scaling
+        cmd = self.commands[:, :2]
+        cmd_norm = torch.norm(cmd, dim=1) + 1e-6  # Add small epsilon to avoid division by zero
+        vel_norm = torch.norm(vel, dim=1) + 1e-6  # Add small epsilon to avoid division by zero
+        
+        # Calculate dot product to check direction alignment
+        dot_product = torch.sum(cmd * vel, dim=1)
+        cosine_similarity = dot_product / (cmd_norm * vel_norm)
+        
+        # Calculate relative error (normalized by command magnitude)
+        abs_diff = torch.norm(cmd - vel, dim=1)
+        relative_error = abs_diff / cmd_norm
+        
+        # Base tracking reward using relative error
+        tracking_reward = torch.exp(-relative_error / self.reward_cfg["tracking_sigma"])
+        
+        # Apply direction penalty when dot product is negative (vectors pointing in opposite directions)
+        wrong_direction_mask = cosine_similarity < 0
+        if wrong_direction_mask.any():
+            # Penalize more severely when moving in the wrong direction
+            # The penalty increases as the cosine similarity becomes more negative
+            direction_penalty = 1.0 + torch.abs(cosine_similarity[wrong_direction_mask])
+            tracking_reward[wrong_direction_mask] = -0.5 * direction_penalty
+        
+        # Special case: when command is very small, use absolute error instead
+        small_cmd_mask = cmd_norm < 0.05
+        if small_cmd_mask.any():
+            # For small commands, use absolute error with a reasonable threshold
+            abs_error = torch.sum(torch.square(cmd[small_cmd_mask] - vel[small_cmd_mask]), dim=1)
+            tracking_reward[small_cmd_mask] = torch.exp(-abs_error / self.reward_cfg["tracking_sigma"])
+        
+        return tracking_reward
 
     def _reward_tracking_ang_vel(self):
+        if self.reward_cfg["use_old_rewards"]:
+            ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
+            return torch.exp(-ang_vel_error / self.reward_cfg["tracking_sigma"])
         # Tracking of angular velocity commands (yaw)
-        ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
+        if self.reward_cfg["moving_avg_for_ang_vel_tacking"]:
+            ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel_moving_avg[:, 2])
+        else:
+            ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
         return torch.exp(-ang_vel_error / self.reward_cfg["tracking_sigma"])
 
     def _reward_lin_vel_z(self):
@@ -444,10 +538,10 @@ class ZbotEnv:
 
     def _reward_gait_symmetry(self):
         # Reward symmetric gait patterns
-        left_hip = self.dof_pos[:, self.env_cfg["dof_names"].index("L_Hip_Pitch")]
-        right_hip = self.dof_pos[:, self.env_cfg["dof_names"].index("R_Hip_Pitch")]
-        left_knee = self.dof_pos[:, self.env_cfg["dof_names"].index("L_Knee_Pitch")]
-        right_knee = self.dof_pos[:, self.env_cfg["dof_names"].index("R_Knee_Pitch")]
+        left_hip = self.dof_pos[:, self.env_cfg["dof_names"].index("left_hip_pitch")]
+        right_hip = self.dof_pos[:, self.env_cfg["dof_names"].index("right_hip_pitch")]
+        left_knee = self.dof_pos[:, self.env_cfg["dof_names"].index("left_knee")]
+        right_knee = self.dof_pos[:, self.env_cfg["dof_names"].index("right_knee")]
         
         hip_symmetry = torch.abs(left_hip - right_hip)
         knee_symmetry = torch.abs(left_knee - right_knee)

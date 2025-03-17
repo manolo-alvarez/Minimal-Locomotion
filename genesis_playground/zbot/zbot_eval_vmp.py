@@ -10,6 +10,7 @@ from zbot_env_vmp import ZbotEnvVMP  # Use your VMP-based environment
 from rsl_rl.runners import OnPolicyRunner
 from policy_analyzer import PolicyAnalyzer  # Add this import at the module level
 import random
+from parse_urdf import parse_urdf_joint_limits
 from custom_policies import VAEConditionedActorCritic
 
 import genesis as gs
@@ -634,14 +635,24 @@ def main():
     args = parser.parse_args()
 
     gs.init()
+    new_urdf = "genesis_playground/resources/zbot_new/robot.urdf"
+    joint_limits = parse_urdf_joint_limits(new_urdf)
 
     log_dir = f"{args.log_dir}/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(open(f"{args.log_dir}/{args.exp_name}/cfgs.pkl", "rb"))
-
+    env_cfg["joint_limits"] = joint_limits
+    env_cfg["random_start_chance"] = 0.0
+    env_cfg["termination_if_roll_greater_than"] = 45
+    env_cfg["termination_if_pitch_greater_than"] = 45
     reward_cfg = {
         "tracking_sigma": 0.25,
         "base_height_target": 0.3,
         "feet_height_target": 0.075,
+        "moving_avg_for_lin_vel_tacking": False,
+        "use_old_rewards": True,
+        "lin_vel_moving_avg_alpha": 0.182,
+        "moving_avg_for_ang_vel_tacking": False,
+        "ang_vel_moving_avg_alpha": 0.182,
         "reward_scales": {
             "tracking_lin_vel": 1.0,
             "tracking_ang_vel": 0.2,
@@ -652,7 +663,6 @@ def main():
             "feet_air_time": 5.0,
         },
     }
-
     print(f'obs config: {obs_cfg}')
     # Create environment with show_viewer=True directly
     env = ZbotEnvVMP(

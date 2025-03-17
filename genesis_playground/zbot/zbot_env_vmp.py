@@ -26,6 +26,7 @@ class ZbotEnvVMP(ZbotEnv):
             "joint_vel_weight": 0.2   # Weight for joint velocity tracking
         })
         
+
         super().__init__(num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, 
                         show_viewer=show_viewer, device=device)
         
@@ -55,6 +56,7 @@ class ZbotEnvVMP(ZbotEnv):
         
         # Load VAE model if provided
         if vae_model_path:
+            print(f"Loading VAE model from {vae_model_path}")
             self.vae = self._load_vae(vae_model_path)
             self.vae.eval()
             self._init_motion_reference()
@@ -326,26 +328,7 @@ class ZbotEnvVMP(ZbotEnv):
                 reconstructed_window = reconstructed_window.reshape(1, self.motion_window_size, self.motion_dim)
                 
                 # Plot comparison
-                import matplotlib.pyplot as plt
-                plt.figure(figsize=(12, 6))
-                for j in range(3):
-                    plt.subplot(3, 2, 2*j+1)
-                    plt.plot(original_window[0, :, j], label='Original')
-                    plt.plot(reconstructed_window[0, :, j], label='Reconstructed')
-                    plt.title(f"Joint {j} Position")
-                    plt.legend()
-                    
-                    plt.subplot(3, 2, 2*j+2)
-                    vel_idx = j + len(self.env_cfg["selected_joints"])
-                    plt.plot(original_window[0, :, vel_idx], label='Original')
-                    plt.plot(reconstructed_window[0, :, vel_idx], label='Reconstructed')
-                    plt.title(f"Joint {j} Velocity")
-                    plt.legend()
-                
-                plt.tight_layout()
-                plt.savefig(f"vae_reconstruction_{self.step_count}.png")
-                plt.close()
-        
+               
         # Get current frame as motion reference
         self.current_m = new_window[self.window_size].clone()
         
