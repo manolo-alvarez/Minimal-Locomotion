@@ -19,14 +19,25 @@ class ZbotEnvVMP(ZbotEnv):
                  vae_model_path=None, show_viewer=False, device="cuda"):
         # Add motion tracking reward weights to reward_cfg
         reward_cfg.update({
-            "pos_weight": 1.0,        # Weight for joint position tracking
-            "vel_weight": 0.1,        # Weight for joint velocity tracking
-            "root_pos_weight": 0.5,   # Weight for root position tracking
-            "root_rot_weight": 0.5    # Weight for root rotation tracking
+            "pos_weight": 1.0,        # Weight for end-effector position tracking
+            "rot_weight": 0.5,        # Weight for rotation tracking
+            "vel_weight": 0.2,        # Weight for velocity tracking
+            "joint_weight": 0.5,      # Weight for joint position tracking
+            "joint_vel_weight": 0.2   # Weight for joint velocity tracking
         })
         
         super().__init__(num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, 
                         show_viewer=show_viewer, device=device)
+        
+        # Initialize tracking variables
+        self.deviation_counter = torch.zeros(self.num_envs, device=self.device)
+        self.prev_actions = torch.zeros_like(self.actions)  # For second-order smoothness
+        
+        # Store the reward weights
+        self.motion_reward_weights = {k: reward_cfg.get(k, 1.0) for k in [
+            "pos_weight", "rot_weight", "vel_weight", 
+            "joint_weight", "joint_vel_weight", "alive_bonus"
+        ]}
         
         # VMP-specific initialization
         self.window_size = env_cfg.get("window_size", 15)  # Must match VMP training config
@@ -42,14 +53,6 @@ class ZbotEnvVMP(ZbotEnv):
         self.current_m = None
         self.step_count = 0  # Initialize step counter
         
-        # Store reward weights for motion tracking
-        self.motion_reward_weights = {
-            "pos_weight": reward_cfg.get("pos_weight", 1.0),
-            "vel_weight": reward_cfg.get("vel_weight", 0.1),
-            "root_pos_weight": reward_cfg.get("root_pos_weight", 0.5),
-            "root_rot_weight": reward_cfg.get("root_rot_weight", 0.5)
-        }
-        
         # Load VAE model if provided
         if vae_model_path:
             self.vae = self._load_vae(vae_model_path)
@@ -62,13 +65,13 @@ class ZbotEnvVMP(ZbotEnv):
             self._update_observation_space()  # This must recreate actor_obs_mapping
         
         # Domain randomization parameters from Disney paper
-        self.domain_rand_cfg = {
-            "mass_range": [0.8, 1.2],
-            "friction_range": [0.5, 1.5],
-            "joint_noise": 0.05,
-            "push_interval": 2.0,
-            "push_force_range": [5, 20]
-        }
+        # self.domain_rand_cfg = {
+        #     "mass_range": [0.8, 1.2],
+        #     "friction_range": [0.5, 1.5],
+        #     "joint_noise": 0.05,
+        #     "push_interval": 2.0,
+        #     "push_force_range": [5, 20]
+        # }
 
     def populate_observation_buffers(self):
         """Populate observation buffers with current state"""
@@ -287,6 +290,7 @@ class ZbotEnvVMP(ZbotEnv):
                 new_window = torch.cat([new_window, padding])
             else:
                 new_window = new_window[:self.motion_window_size]
+        # Add logging in _sample_next_frame()
         
         # Get latent encoding
         with torch.no_grad():
@@ -367,6 +371,38 @@ class ZbotEnvVMP(ZbotEnv):
             self.populate_observation_buffers()
         
         return self.actor_obs_buf
+        
+    # def reset(self):
+    #     # Reset step counter
+    #     self.step_count = 0
+        
+    #     # Call parent reset
+    #     super().reset()
+        
+    #     # Sample new motion window and encode
+    #     if self.vae:
+    #         self.current_window = self._sample_next_frame()
+            
+    #         # Validate window shape
+    #         assert self.current_window.ndim == 2, "Window must be 2D"
+    #         assert self.current_window.shape[0] == self.motion_window_size, "Incorrect window length"
+            
+    #         self.current_m = self.current_window[self.window_size]  # Current frame
+            
+    #         # Important: Set initial pose close to reference
+    #         ref_pos = self.current_m[:len(self.env_cfg["selected_joints"])].clone()
+    #         # Convert normalized reference positions back to actual joint angles if needed
+    #         if hasattr(self, 'motion_scaler'):
+    #             ref_pos_np = ref_pos.cpu().numpy().reshape(1, -1)
+    #             ref_pos_denorm = self.motion_scaler.inverse_transform(ref_pos_np)
+    #             ref_pos = torch.from_numpy(ref_pos_denorm).float().to(self.device).view(-1)
+            
+    #         # Set robot DOF positions with small noise
+    #         self.dof_pos = ref_pos.unsqueeze(0).expand(self.num_envs, -1) + torch.randn_like(self.dof_pos) * 0.05
+            
+    #         self.populate_observation_buffers()
+        
+    #     return self.actor_obs_buf
 
     def step(self, actions):
         # Update motion reference before parent's step()
@@ -406,8 +442,8 @@ class ZbotEnvVMP(ZbotEnv):
         #     print(f"Any reset: {done.any().item()}")
         #     print(f"Number of resets: {done.sum().item()}")
         
-        # Force some environments to reset randomly (1% chance each step)
-        random_resets = torch.rand(self.num_envs, device=self.device) < 0.01
+        # Force some environments to reset randomly (0.1% chance each step)
+        random_resets = torch.rand(self.num_envs, device=self.device) < 0.001  # Reduced from 0.01
         done = done | random_resets
         
         # Increment step counter
@@ -448,119 +484,296 @@ class ZbotEnvVMP(ZbotEnv):
         # Update observation dimensions
         self.num_obs = len(self.obs_labels)
 
+    # def _reward_motion_tracking(self):
+    #     if not self.vae:
+    #         return torch.zeros(self.num_envs, device=self.device)
+        
+    #     # Get reference values from motion frame
+    #     ref_pos = self.current_m[:len(self.env_cfg["selected_joints"])]
+    #     ref_vel = self.current_m[len(self.env_cfg["selected_joints"]):]
+        
+    #     # 1. Tracking reward (r_track)
+    #     # Height tracking (c_h term)
+    #     height_error = torch.sum((self.base_pos[:, 2] - ref_pos[2].unsqueeze(0))**2, dim=0)
+        
+    #     # Rotation tracking (c_θ term)
+    #     rot_error = torch.sum((self.base_euler - ref_pos[:3].unsqueeze(0))**2, dim=1)
+        
+    #     # Velocity tracking (c_v term)
+    #     vel_error = torch.sum((self.dof_vel - ref_vel.unsqueeze(0))**2, dim=1)
+        
+    #     # Joint position tracking (c_q term)
+    #     joint_pos_error = torch.sum((self.dof_pos - ref_pos.unsqueeze(0))**2, dim=1)
+        
+    #     # Joint velocity tracking (c_q˙ term)
+    #     joint_vel_error = torch.sum((self.dof_vel - ref_vel.unsqueeze(0))**2, dim=1)
+        
+    #     # End-effector position tracking (c_p term)
+    #     # Get current joint positions for end-effector tracking
+    #     current_dof_pos = self.robot.get_dofs_position()
+    #     # Use joint positions to compute end-effector error
+    #     ee_pos_error = torch.sum((current_dof_pos[:, -2:] - ref_pos[-2:].unsqueeze(0))**2, dim=1)  # Only track ankle joints
+        
+    #     # Combine tracking rewards with weights from config
+    #     r_track = -(
+    #         self.motion_reward_weights["pos_weight"] * ee_pos_error +
+    #         self.motion_reward_weights["rot_weight"] * rot_error +
+    #         self.motion_reward_weights["vel_weight"] * vel_error +
+    #         self.motion_reward_weights["joint_weight"] * joint_pos_error +
+    #         self.motion_reward_weights["joint_vel_weight"] * joint_vel_error
+    #     )
+        
+    #     # 2. Alive reward (r_alive)
+    #     r_alive = self.motion_reward_weights.get("alive_bonus", 0.5)
+        
+    #     # Check for early termination condition
+    #     max_deviation = torch.max(torch.abs(ee_pos_error), dim=1)[0] if ee_pos_error.dim() > 1 else ee_pos_error
+    #     deviation_threshold = self.reward_cfg.get("max_deviation_threshold", 0.5)
+        
+    #     # Use torch.any() to check if any max_deviation exceeds the threshold
+    #     exceeds_mask = max_deviation > deviation_threshold
+    #     self.deviation_counter[exceeds_mask] += 1
+    #     self.deviation_counter[~exceeds_mask] = 0 
+        
+    #     # 3. Smoothness reward (r_smooth)
+    #     # First-order action rate penalty
+    #     action_rate = torch.sum((self.actions - self.last_actions)**2, dim=1)
+    #     # Second-order action rate penalty
+    #     action_rate2 = torch.sum((self.actions - 2*self.last_actions + self.prev_actions)**2, dim=1)
+    #     # Torque penalty
+    #     torque = torch.sum(self.actions**2, dim=1)
+        
+    #     r_smooth = -(
+    #         self.reward_scales.get("action_rate", 0.1) * action_rate +
+    #         self.reward_scales.get("action_rate2", 0.05) * action_rate2 +
+    #         self.reward_scales.get("torque_penalty", 0.01) * torque
+    #     )
+        
+    #     # Combine all rewards
+    #     reward = (
+    #         self.reward_scales.get("motion_tracking", 1.0) * r_track +
+    #         r_alive +
+    #         r_smooth
+    #     )
+        
+    #     return reward
     def _reward_motion_tracking(self):
         if not self.vae:
             return torch.zeros(self.num_envs, device=self.device)
         
-        # Get reference values
+        # Get reference values from motion frame
         ref_pos = self.current_m[:len(self.env_cfg["selected_joints"])]
-        ref_vel = self.current_m[len(self.env_cfg["selected_joints"]):]
         
-        # Normalize reference values to match scale of actual values
-        ref_pos = ref_pos * 0.1  # Scale down reference positions
-        ref_vel = ref_vel * 0.005  # Scale down reference velocities more aggressively
+        # Focus on just joint positions first
+        joint_pos_error = torch.sum((self.dof_pos - ref_pos.unsqueeze(0))**2, dim=1)
         
-        # Calculate tracking errors with proper normalization
-        pos_error = torch.mean((self.dof_pos - ref_pos.unsqueeze(0))**2, dim=1) * 0.1  # Scale down position error
-        vel_error = torch.mean((self.dof_vel - ref_vel.unsqueeze(0))**2, dim=1) * 0.005  # Scale down velocity error more aggressively
+        # Use a soft exponential reward instead of direct error
+        tracking_reward = torch.exp(-5.0 * joint_pos_error)
         
-        # Handle root position and rotation errors with normalization
-        root_pos_error = torch.mean((self.base_pos[:, :2] - ref_pos[:2].unsqueeze(0))**2, dim=1) * 0.2  # Increase root pos error scale
-        root_rot_error = torch.mean((self.base_euler[:, 2:3] - ref_pos[2:3].unsqueeze(0))**2, dim=1) * 0.001  # Keep rotation error scale
-        
-        # Use weights from config but adjust them for better balance
-        weights = {
-            "pos_weight": self.motion_reward_weights["pos_weight"] * 2.0,  # Double position weight
-            "vel_weight": self.motion_reward_weights["vel_weight"],  # Keep velocity weight
-            "root_pos_weight": self.motion_reward_weights["root_pos_weight"] * 0.5,  # Reduce root position weight
-            "root_rot_weight": self.motion_reward_weights["root_rot_weight"] * 0.01  # Keep root rotation weight
-        }
-        
-        # Combine rewards using adjusted weights
-        reward = -(
-            weights["pos_weight"] * pos_error +
-            weights["vel_weight"] * vel_error +
-            weights["root_pos_weight"] * root_pos_error +
-            weights["root_rot_weight"] * root_rot_error
-        )
-        
-        # Scale up the entire motion tracking reward
-        reward = reward * 50.0  # Increase from 10.0 to 50.0
-        
-        return reward
+        return tracking_reward
 
-    def _apply_domain_randomization(self):
-        """Apply Disney paper's domain randomization"""
-        # Mass randomization
-        masses = self.robot.get_link_masses()
-        rand_masses = masses * torch.FloatTensor(self.num_envs, 1).uniform_(*self.domain_rand_cfg["mass_range"])
-        self.robot.set_link_masses(rand_masses)
+    # def _apply_domain_randomization(self):
+    #     """Apply Disney paper's domain randomization"""
+    #     # Mass randomization
+    #     masses = self.robot.get_link_masses()
+    #     rand_masses = masses * torch.FloatTensor(self.num_envs, 1).uniform_(*self.domain_rand_cfg["mass_range"])
+    #     self.robot.set_link_masses(rand_masses)
         
-        # Friction randomization
-        friction = torch.FloatTensor(self.num_envs).uniform_(*self.domain_rand_cfg["friction_range"])
-        self.plane.set_friction(friction)
+    #     # Friction randomization
+    #     friction = torch.FloatTensor(self.num_envs).uniform_(*self.domain_rand_cfg["friction_range"])
+    #     self.plane.set_friction(friction)
         
-        # Joint noise
-        joint_pos = self.robot.get_dofs_position()
-        joint_pos += torch.randn_like(joint_pos) * self.domain_rand_cfg["joint_noise"]
-        self.robot.set_dofs_position(joint_pos)
+    #     # Joint noise
+    #     joint_pos = self.robot.get_dofs_position()
+    #     joint_pos += torch.randn_like(joint_pos) * self.domain_rand_cfg["joint_noise"]
+    #     self.robot.set_dofs_position(joint_pos)
         
-        # Random pushes
-        if self.step_count % int(self.domain_rand_cfg["push_interval"] / self.dt) == 0:
-            push_force = torch.FloatTensor(self.num_envs, 3).uniform_(*self.domain_rand_cfg["push_force_range"])
-            self.robot.apply_force(push_force)
+    #     # Random pushes
+    #     if self.step_count % int(self.domain_rand_cfg["push_interval"] / self.dt) == 0:
+    #         push_force = torch.FloatTensor(self.num_envs, 3).uniform_(*self.domain_rand_cfg["push_force_range"])
+    #         self.robot.apply_force(push_force)
 
+    def _reward_action_rate(self):
+        # First-order action rate penalty
+        return -torch.sum(torch.square(self.actions - self.last_actions), dim=1)
+
+    def _reward_action_rate2(self):
+        # Second-order action rate penalty (acceleration)
+        return -torch.sum(torch.square(self.actions - 2*self.last_actions + self.prev_actions), dim=1)
+
+    def _reward_torque_penalty(self):
+        """Penalize high torque/action magnitudes"""
+        return -torch.sum(torch.square(self.actions), dim=1)
+
+    def _reward_early_termination(self):
+        """Penalty for early termination due to large deviations from reference motion"""
+        penalty = torch.zeros(self.num_envs, device=self.device)
+        
+        if hasattr(self, 'deviation_counter'):
+            # Ensure deviation_counter is a tensor
+            if not isinstance(self.deviation_counter, torch.Tensor):
+                self.deviation_counter = torch.tensor(self.deviation_counter, device=self.device)
+
+            # Check if deviation threshold is exceeded
+            deviation_threshold = self.reward_cfg.get("deviation_frames_threshold", 10)
+            termination_mask = self.deviation_counter > deviation_threshold
+            
+            penalty[termination_mask] = -1.0  # Base penalty
+            
+            # Scale penalty by how much the threshold was exceeded
+            if termination_mask.any():  # Check if there are any True values in termination_mask
+                excess_frames = self.deviation_counter[termination_mask] - deviation_threshold
+                penalty[termination_mask] *= (1.0 + 0.1 * excess_frames)  # Additional penalty for longer deviations
+        
+        return penalty
+
+    def _reward_alive_bonus(self):
+        alive_bonus = torch.ones(self.num_envs, device=self.device) * self.reward_scales.get("alive_bonus", 0.5)
+        
+        if hasattr(self, 'deviation_counter'):
+            # Ensure we're working with a tensor
+            if not isinstance(self.deviation_counter, torch.Tensor):
+                self.deviation_counter = torch.tensor(self.deviation_counter, device=self.device)
+            
+            # Use tensor-safe operations
+            deviation_penalty = torch.clamp(
+                self.deviation_counter.float() / self.reward_cfg.get("deviation_frames_threshold", 10),
+                min=0.0,  # Use positional args
+                max=1.0
+            )
+            alive_bonus *= (1.0 - deviation_penalty)
+        
+        return alive_bonus
+        
+    # def compute_reward(self):
+    # # Compute only the essential rewards
+    #     rewards = {
+    #         "motion_tracking": self._reward_motion_tracking(),
+    #         "alive_bonus": self._reward_alive_bonus(),
+    #     }
+        
+    #     # Use new scaling factors for these components
+    #     reward_scales = {
+    #         "motion_tracking": 1.0,   # Increase scale to 1.0 for clarity
+    #         "alive_bonus": 10.0,      # Boost alive bonus as per our change above
+    #     }
+        
+    #     total_reward = rewards["motion_tracking"] * reward_scales["motion_tracking"] + \
+    #                 rewards["alive_bonus"] * reward_scales["alive_bonus"]
+                    
+    #     # Build reward_info dictionary (optional logging)
+    #     reward_info = {
+    #         "motion_tracking": (rewards["motion_tracking"] * reward_scales["motion_tracking"]).mean().item(),
+    #         "alive_bonus": (rewards["alive_bonus"] * reward_scales["alive_bonus"]).mean().item(),
+    #         "total_reward": total_reward.mean().item(),
+    #         "episode_length": self.episode_length_buf.float().mean().item()
+    #     }
+    #     print("Raw motion tracking reward:", self._reward_motion_tracking().mean().item())
+    #     print("Scaled motion tracking reward:", (self._reward_motion_tracking() * motion_tracking_scale).mean().item())
+    #     print("Raw alive bonus:", self._reward_alive_bonus().mean().item())
+    #     print("Scaled alive bonus:", (self._reward_alive_bonus() * alive_bonus_scale).mean().item())
+
+        
+    #     return total_reward, reward_info
     def compute_reward(self):
-        """Compute all rewards including base rewards and motion tracking"""
-        # Get base rewards
-        print("You are in the compute_reward", self._reward_tracking_lin_vel(), self._reward_tracking_ang_vel )
-        rewards = {
-            "tracking_lin_vel": self._reward_tracking_lin_vel(),
-            "tracking_ang_vel": self._reward_tracking_ang_vel(),
-            "lin_vel_z": self._reward_lin_vel_z(),
-            "base_height": self._reward_base_height(),
-            "action_rate": self._reward_action_rate(),
-            "similar_to_default": self._reward_similar_to_default(),
-            "feet_air_time": self._reward_feet_air_time(),
+        # Simplified reward computation
+        motion_tracking = self._reward_motion_tracking()
+        alive_bonus = torch.ones(self.num_envs, device=self.device) * 10.0  # Fixed value for debugging
+        
+        # Scale and combine
+        total_reward = motion_tracking * 5.0 + alive_bonus
+        
+        # Log raw components
+        print(f"Raw motion tracking: {motion_tracking.mean().item():.4f}")
+        print(f"Raw alive bonus: {alive_bonus.mean().item():.4f}")
+        print(f"Total reward: {total_reward.mean().item():.4f}")
+        
+        return total_reward, {
+            "motion_tracking": motion_tracking.mean().item() * 5.0,
+            "alive_bonus": alive_bonus.mean().item(),
+            "total_reward": total_reward.mean().item()
         }
+
+
+    # def compute_reward(self):
+    #     """Compute all rewards including base rewards and motion tracking"""
+    #     # Get base rewards
+    #     rewards = {
+    #         "tracking_lin_vel": self._reward_tracking_lin_vel(),
+    #         "tracking_ang_vel": self._reward_tracking_ang_vel(),
+    #         "lin_vel_z": self._reward_lin_vel_z(),
+    #         "base_height": self._reward_base_height(),
+    #         "action_rate": self._reward_action_rate(),
+    #         "action_rate2": self._reward_action_rate2(),
+    #         "torque_penalty": self._reward_torque_penalty(),
+    #         "alive_bonus": self._reward_alive_bonus(),
+    #         "early_termination": self._reward_early_termination(),
+    #         "similar_to_default": self._reward_similar_to_default(),
+    #         "feet_air_time": self._reward_feet_air_time(),
+    #     }
         
-        # Add motion tracking reward if VAE is available
-        if hasattr(self, 'vae') and self.vae is not None:
-            motion_tracking = self._reward_motion_tracking()
-            rewards["motion_tracking"] = motion_tracking
+    #     # Add motion tracking reward if VAE is available
+    #     if hasattr(self, 'vae') and self.vae is not None:
+    #         motion_tracking = self._reward_motion_tracking()
+    #         rewards["motion_tracking"] = motion_tracking
         
-        # Scale rewards and store both raw and scaled values
-        scaled_rewards = {}
-        reward_info = {}
-        total_reward = torch.zeros(self.num_envs, device=self.device)
+    #     # Scale rewards and store both raw and scaled values
+    #     scaled_rewards = {}
+    #     reward_info = {}
+    #     total_reward = torch.zeros(self.num_envs, device=self.device)
         
-        # Define reward scales to balance components
-        reward_scales = {
-            "tracking_lin_vel": 0.2,    # Further reduce base locomotion rewards
-            "tracking_ang_vel": 0.2,
-            "lin_vel_z": 0.2,
-            "base_height": 0.2,
-            "action_rate": 0.05,        # Further reduce action rate penalty
-            "similar_to_default": 0.05,  # Further reduce default pose penalty
-            "feet_air_time": 0.2,
-            "motion_tracking": 1.0       # Keep motion tracking at full scale
-        }
+    #     # Define reward scales to balance components
+    #     # In compute_rewards() -> reward_scales dictionary:
+    #     reward_scales = {
+    #         "tracking_lin_vel": 0.002,    # Reduced from 0.2
+    #         "tracking_ang_vel": 0.001,    # Reduced from 0.2
+    #         "lin_vel_z": 0.001,           # Reduced from 0.2
+    #         "base_height": 0.001,         # Reduced from 0.2
+    #         "action_rate": -0.0001,       # Now negative (was 0.05)
+    #         "action_rate2": -0.00005,     # Now negative (was 0.025)
+    #         "torque_penalty": -0.00001,   # Now negative (was 0.01)
+    #         "alive_bonus": 0.5,           # Keep positive
+    #         "early_termination": 2.0,     # Now positive (was -2.0)
+    #         "similar_to_default": 0.0005, # Reduced from 0.05
+    #         "feet_air_time": 0.002,       # Reduced from 0.2
+    #         "motion_tracking": 0.01       # Reduced from 1.0
+    #     }
         
-        for name, reward in rewards.items():
-            # Get scale from our defined scales or config, default to 1.0
-            scale = reward_scales.get(name, self.reward_cfg.get("reward_scales", {}).get(name, 1.0))
+    #     for name, reward in rewards.items():
+    #         # Get scale from our defined scales or config, default to 1.0
+    #         scale = reward_scales.get(name, self.reward_cfg.get("reward_scales", {}).get(name, 1.0))
             
-            # Store raw and scaled values
-            reward_info[f"raw_{name}"] = reward.mean().item()
-            scaled_reward = reward * scale
-            reward_info[name] = scaled_reward.mean().item()
-            scaled_rewards[name] = scaled_reward
+    #         # Store raw and scaled values
+    #         reward_info[f"raw_{name}"] = reward.mean().item()
+    #         scaled_reward = reward * scale
+    #         scaled_reward = torch.clamp(scaled_reward, min=-10.0, max=10.0)  # Add this line
+    #         reward_info[name] = scaled_reward.mean().item()
+    #         scaled_rewards[name] = scaled_reward
             
-            # Add to total
-            total_reward += scaled_reward
+    #         # Add to total
+    #         total_reward += scaled_reward
         
-        # Store episode statistics
-        reward_info["total_reward"] = total_reward.mean().item()
-        reward_info["episode_length"] = self.episode_length_buf.float().mean().item()
+    #     # Store episode statistics
+    #     reward_info["total_reward"] = total_reward.mean().item()
+    #     reward_info["episode_length"] = self.episode_length_buf.float().mean().item()
         
-        return total_reward, reward_info
+    #     return total_reward, reward_info
+        
+    #     for name, reward in rewards.items():
+    #         # Get scale from our defined scales or config, default to 1.0
+    #         scale = reward_scales.get(name, self.reward_cfg.get("reward_scales", {}).get(name, 1.0))
+            
+    #         # Store raw and scaled values
+    #         reward_info[f"raw_{name}"] = reward.mean().item()
+    #         scaled_reward = reward * scale
+    #         reward_info[name] = scaled_reward.mean().item()
+    #         scaled_rewards[name] = scaled_reward
+            
+    #         # Add to total
+    #         total_reward += scaled_reward
+        
+    #     # Store episode statistics
+    #     reward_info["total_reward"] = total_reward.mean().item()
+    #     reward_info["episode_length"] = self.episode_length_buf.float().mean().item()
+        
+    #     return total_reward, reward_info

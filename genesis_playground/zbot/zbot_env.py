@@ -112,7 +112,7 @@ class ZbotEnv:
         self.inv_base_init_quat = inv_quat(self.base_init_quat)
         self.robot = self.scene.add_entity(
             gs.morphs.URDF(
-                file="genesis_playground/resources/zbot/robot_fixed.urdf",
+                file="genesis_playground/resources/zbot_new/robot.urdf",
                 pos=self.base_init_pos.cpu().numpy(),
                 quat=self.base_init_quat.cpu().numpy(),
             ),

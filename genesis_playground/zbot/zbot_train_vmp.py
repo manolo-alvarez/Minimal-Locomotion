@@ -37,13 +37,13 @@ def get_train_cfg(exp_name, max_iterations, latent_dim):
         "algorithm": {
             "clip_param": 0.2,
             "desired_kl": 0.02,
-            "entropy_coef": 0.02,
+            "entropy_coef": 0.1,
             "gamma": 0.99,
             "lam": 0.95,
-            "learning_rate": 0.001,
+            "learning_rate": 0.0001,
             "max_grad_norm": 1.0,
-            "num_learning_epochs": 8,
-            "num_mini_batches": 4,
+            "num_learning_epochs": 6,
+            "num_mini_batches": 6,
             "schedule": "adaptive",
             "use_clipped_value_loss": True,
             "value_loss_coef": 1.0,
@@ -54,7 +54,7 @@ def get_train_cfg(exp_name, max_iterations, latent_dim):
             "activation": "elu",
             "actor_hidden_dims": [512, 256, 128],
             "critic_hidden_dims": [512, 256, 128],
-            "init_noise_std": 1.0,
+            "init_noise_std": 0.1,
             "class_name": "VAEConditionedActorCritic",
             "conditional_dim": latent_dim + 20  # VMP addition
         },
@@ -91,22 +91,45 @@ def get_cfgs(vae_model_path=None):
     env_cfg = {
         "num_actions": 10,
         "default_joint_angles": {
-            "R_Hip_Pitch": 0.0,
-            "L_Hip_Pitch": 0.0,
-            "R_Hip_Yaw": 0.0,
-            "L_Hip_Yaw": 0.0,
-            "R_Hip_Roll": 0.0,
-            "L_Hip_Roll": 0.0,
-            "R_Knee_Pitch": 0.0,
-            "L_Knee_Pitch": 0.0,
-            "R_Ankle_Pitch": 0.0,
-            "L_Ankle_Pitch": 0.0,
+            # "R_Hip_Pitch": 0.0,
+            # "L_Hip_Pitch": 0.0,
+            # "R_Hip_Yaw": 0.0,
+            # "L_Hip_Yaw": 0.0,
+            # "R_Hip_Roll": 0.0,
+            # "L_Hip_Roll": 0.0,
+            # "R_Knee_Pitch": 0.0,
+            # "L_Knee_Pitch": 0.0,
+            # "R_Ankle_Pitch": 0.0,
+            # "L_Ankle_Pitch": 0.0,
+            "right_hip_pitch": 0.0,
+            "left_hip_pitch": 0.0,
+            "right_hip_yaw": 0.0,
+            "left_hip_yaw": 0.0,
+            "right_hip_roll": 0.0,
+            "left_hip_roll": 0.0,
+            "right_knee": 0.0,
+            "left_knee": 0.0,
+            "right_ankle": 0.0,
+            "left_ankle": 0.0,
         },
+        # "dof_names": [
+        #     "R_Hip_Pitch", "L_Hip_Pitch", "R_Hip_Yaw", "L_Hip_Yaw",
+        #     "R_Hip_Roll", "L_Hip_Roll", "R_Knee_Pitch", "L_Knee_Pitch",
+        #     "R_Ankle_Pitch", "L_Ankle_Pitch",
+        # ],
         "dof_names": [
-            "R_Hip_Pitch", "L_Hip_Pitch", "R_Hip_Yaw", "L_Hip_Yaw",
-            "R_Hip_Roll", "L_Hip_Roll", "R_Knee_Pitch", "L_Knee_Pitch",
-            "R_Ankle_Pitch", "L_Ankle_Pitch",
-        ],
+            "right_hip_pitch",
+            "left_hip_pitch",
+            "right_hip_yaw",
+            "left_hip_yaw",
+            "right_hip_roll",
+            "left_hip_roll",
+            "right_knee",
+            "left_knee",
+            "right_ankle",
+            "left_ankle",],
+            
+        
         "env_friction_range": {"start": [0.9, 1.1], "end": [0.9, 1.1]},
         "link_mass_multipliers": {"start": [1.0, 1.0], "end": [1.0, 1.0]},
         "rfi_scale": 0.1,
@@ -118,9 +141,9 @@ def get_cfgs(vae_model_path=None):
         "termination_if_pitch_greater_than": 10,
         "base_init_pos": [0.0, 0.0, 0.41],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
-        "episode_length_s": 2.0,  # Reduced from 20.0 to 2.0 seconds for testing
+        "episode_length_s": 10.0,  # Reduced from 20.0 to 2.0 seconds for testing
         "resampling_time_s": 4.0,
-        "action_scale": 0.25,
+        "action_scale": 0.5,
         "simulate_action_latency": True,
         "clip_actions": 100.0,
         "max_torque": 10.0,
@@ -136,12 +159,12 @@ def get_cfgs(vae_model_path=None):
     obs_cfg = {
         "num_obs": 39 + 64 + 20,  # Original + latent + motion
         "obs_scales": {
-            "lin_vel": 2.0,
+            "lin_vel": 50.0,
             "ang_vel": 0.25,
-            "dof_pos": 1.0,
-            "dof_vel": 0.05,
-            "motion": 1.0,  # VMP addition
-            "latent": 1.0   # VMP addition
+            "dof_pos": 10.0,
+            "dof_vel": 0.5,
+            "motion": 0.5,  # VMP addition
+            "latent": 2.0   # VMP addition
         },
         "obs_exclusions": []
     }
@@ -149,21 +172,34 @@ def get_cfgs(vae_model_path=None):
     reward_cfg = {
         "tracking_sigma": 0.25,
         "base_height_target": 0.3,
-        "feet_height_target": 0.075,
+        "feet_height_target": 0.0075,
         "reward_scales": {
-            "tracking_lin_vel": 2.0,
-            "tracking_ang_vel": 0.5,
-            "lin_vel_z": -2.0,
-            "base_height": -50.0,
-            "action_rate": -0.01,
-            "similar_to_default": -0.2,
-            "feet_air_time": 10.0,
-            "motion_tracking": 2.0
+            # Tracking rewards (r_track)
+            "motion_tracking": 5.0,          # Main tracking component
+            "tracking_lin_vel": 2.0,         # Part of tracking
+            "tracking_ang_vel": 0.5,         # Part of tracking
+            "base_height": -10.0,           # Part of tracking (height maintenance)
+            
+            # Smoothness rewards (r_smooth)
+            "action_rate": -0.1,            # First-order smoothness
+            "action_rate2": -0.05,          # Second-order smoothness (new)
+            "torque_penalty": -0.01,        # Torque penalty (new)
+            
+            # Alive rewards
+            "alive_bonus": 10,             # Basic survival reward
+            "early_termination": -2.0       # Penalty for early termination
         },
-        # VMP additions
-        "pos_weight": 2.0,
-        "vel_weight": 0.2,
-        "alive_bonus": 0.5
+        
+        # Tracking weights (following paper's c_h, c_θ, c_v, etc.)
+        "pos_weight": 1.0,                  # Position tracking (c_p)
+        "rot_weight": 0.5,                  # Rotation tracking (c_θ)
+        "vel_weight": 0.2,                  # Velocity tracking (c_v)
+        "joint_weight": 0.5,                # Joint position tracking (c_q)
+        "joint_vel_weight": 0.2,            # Joint velocity tracking (c_q˙)
+        
+        # Early termination thresholds
+        "max_deviation_threshold": 1,     # Maximum allowed end-effector deviation
+        "deviation_frames_threshold": 10     # Number of frames before termination
     }
 
     command_cfg = {
@@ -265,6 +301,7 @@ class CustomOnPolicyRunner(OnPolicyRunner):
             critic_hidden_dims=critic_hidden_dims,
             activation=activation,
             init_noise_std=init_noise_std,
+            noise_std_type="log",
             conditional_dim=conditional_dim
         ).to(self.device)
 
@@ -302,6 +339,13 @@ class CustomOnPolicyRunner(OnPolicyRunner):
             num_critic_obs=num_critic_obs,
             device=self.device
         )
+
+        # Assuming you have a configuration section for hyperparameters
+        # Adjust action noise standard deviation
+        self.action_noise_std = 1  # Example value, adjust as needed
+
+        # Adjust learning rate in the optimizer
+        self.optimizer = torch.optim.Adam(self.alg.actor_critic.parameters(), lr=0.0001)  # Example value, adjust as needed
 
     def log(self, info):
         if self.log_dir is not None and self.writer is None:
