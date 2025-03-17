@@ -1,12 +1,20 @@
 ## First Time Setup
 Initialize the git submodules:
 ```bash
-git submodule update --init --recursive
+git submodule update --init --recursive --remote
+```
+Set channel priority to flexible to resolve package conflicts
+``` bash
+conda config --set channel_priority flexible
 ```
 
-Create and configure the environment:
+If on MacOS, create and configure the environment with:
 ```bash
-conda env create -f environment.yml
+conda env create -f environment_macos.yml
+```
+If on Linux, create and configure the environment with:
+```bash
+conda env create -f environment_linux.yml
 ```
 
 Activate the environment:

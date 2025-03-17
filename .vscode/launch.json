@@ -11,8 +11,8 @@
             "program": "genesis_playground/zbot/zbot_eval.py",
             "console": "integratedTerminal",
             "args": [
-                "-e", "zbot-walking", 
-                "--ckpt", "299", 
+                "-e", "zbot-tdmpc2_2", 
+                "--ckpt", "60000", 
                 "--device", "mps", 
                 "--analyze", 
                 "--show_viewer"
@@ -33,28 +33,57 @@
             ]
         },
         {
-            "name": "zbot_train (mps)",
+            "name": "Train PPO (mps)",
             "type": "debugpy",
             "request": "launch",
             "program": "genesis_playground/zbot/zbot_train.py",
             "console": "integratedTerminal",
             "args": [
-                "-e", "zbot-walking", 
-                "--num_envs", "4096",
-                "--device", "mps"
+                "-e", "zbot-walking_2", 
+                "--num_envs", "1",
+                "--device", "mps",
+                "--show_viewer", "True"
             ]
         },
         {
-            "name": "zbot_train (cuda)",
+            "name": "Train PPO (cuda)",
             "type": "debugpy",
             "request": "launch",
-            "program": "genesis_playground/zbot/zbot_train",
+            "program": "genesis_playground/zbot/zbot_train_ppo.py",
             "console": "integratedTerminal",
             "args": [
                 "-e", "zbot-walking", 
                 "--num_envs", "4096",
                 "--device", "cuda"
             ]
-        }
+        },
+        {
+            "name": "Train TDMPC2 (mps)",
+            "type": "debugpy",
+            "request": "launch",
+            "justMyCode": true,
+            "program": "genesis_playground/zbot/zbot_train_tdmpc2.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-e", "zbot-tdmpc2_test", 
+                "--num_envs", "1",
+                "--device", "mps",
+                "--use_wandb", "False",
+                "--show_viewer", "True"
+            ]
+        },
+        {
+            "name": "Eval TDMPC2 (mps)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "genesis_playground/zbot/zbot_eval_tdmpc2.py",
+            "console": "integratedTerminal",
+            "args": [
+                "-e", "zbot-tdmpc2_5", 
+                "--ckpt", "160000", 
+                "--device", "mps",
+                "--show_viewer"
+            ]
+        },
     ]
 }
