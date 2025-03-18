@@ -392,19 +392,23 @@ class ZbotEnv:
 
         # reset dofs - with random chance of random starting positions
         if torch.rand(1).item() < self.env_cfg["random_start_chance"]:
-            # For each joint, sample a random position within its limits
+            # For each joint, sample a random position from normal distribution
             num_envs_to_reset = len(envs_idx)
             
             # Start with default positions for all joints
             random_dof_pos = self.default_dof_pos.clone().unsqueeze(0).repeat(num_envs_to_reset, 1)
             
-            # For each joint with limits, replace with random values
+            # For each joint with limits, add normal noise and clamp to limits
             for i, dof_name in enumerate(self.env_cfg["dof_names"]):
                 if dof_name in self.env_cfg["joint_limits"]:
                     lower, upper = self.env_cfg["joint_limits"][dof_name]
-                    # Vectorized sampling for all environments at once
-                    random_pos = torch.rand(num_envs_to_reset, device=self.device) * (upper - lower) + lower
-                    random_dof_pos[:, i] = random_pos
+                    # Sample from normal distribution with mean=0, std=1
+                    noise = torch.randn(num_envs_to_reset, device=self.device)
+                    # Add noise to default position
+                    noisy_pos = self.default_dof_pos[i] + noise
+                    # Clamp to joint limits
+                    clamped_pos = torch.clamp(noisy_pos, min=lower, max=upper)
+                    random_dof_pos[:, i] = clamped_pos
             
             # Assign the random positions to the environments being reset
             self.dof_pos[envs_idx] = random_dof_pos
@@ -537,16 +541,15 @@ class ZbotEnv:
         return torch.square(self.base_pos[:, 2] - self.reward_cfg["base_height_target"])
 
     def _reward_gait_symmetry(self):
-        # Reward symmetric gait patterns
+        # Reward opposite-phase gait patterns (one leg forward when the other is back)
         left_hip = self.dof_pos[:, self.env_cfg["dof_names"].index("left_hip_pitch")]
         right_hip = self.dof_pos[:, self.env_cfg["dof_names"].index("right_hip_pitch")]
-        left_knee = self.dof_pos[:, self.env_cfg["dof_names"].index("left_knee")]
-        right_knee = self.dof_pos[:, self.env_cfg["dof_names"].index("right_knee")]
         
-        hip_symmetry = torch.abs(left_hip - right_hip)
-        knee_symmetry = torch.abs(left_knee - right_knee)
+        # For walking, we want the legs to be in opposite phases
+        # So we reward when left_hip ≈ -right_hip
+        phase_difference = torch.abs(left_hip + right_hip)
         
-        return torch.exp(-(hip_symmetry + knee_symmetry))
+        return torch.exp(-phase_difference)
 
     def _reward_energy_efficiency(self):
         # Reward energy efficiency by penalizing high joint velocities
