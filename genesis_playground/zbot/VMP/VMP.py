@@ -17,9 +17,16 @@ from sklearn.impute import SimpleImputer
 # EPOCHS = 1000
 # BETA = 0.05
 SELECTED_JOINTS = [
-    'left_hip_yaw', 'left_hip_roll', 'left_hip_pitch', 'left_knee',
-    'right_hip_yaw', 'right_hip_roll', 'right_hip_pitch', 'right_knee',
-    'right_ankle', 'left_ankle'
+    "right_hip_pitch",
+    "left_hip_pitch",
+    "right_hip_yaw",
+    "left_hip_yaw",
+    "right_hip_roll",
+    "left_hip_roll",
+    "right_knee",
+    "left_knee",
+    "right_ankle",
+    "left_ankle",
 ]
 
 # class WalkingMotionDataset(Dataset):

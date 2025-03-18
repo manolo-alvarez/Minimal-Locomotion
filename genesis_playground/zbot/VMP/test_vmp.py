@@ -10,9 +10,16 @@ from utils import load_walking_data, WalkingMotionDataset, plot_full_reconstruct
 WINDOW_SIZE = 15
 LATENT_DIM = 64
 SELECTED_JOINTS = [
-    'left_hip_yaw', 'left_hip_roll', 'left_hip_pitch', 'left_knee',
-    'right_hip_yaw', 'right_hip_roll', 'right_hip_pitch', 'right_knee',
-    'right_ankle', 'left_ankle'
+    "right_hip_pitch",
+    "left_hip_pitch",
+    "right_hip_yaw",
+    "left_hip_yaw",
+    "right_hip_roll",
+    "left_hip_roll",
+    "right_knee",
+    "left_knee",
+    "right_ankle",
+    "left_ankle",
 ]
 beta = 0.05
 run = 5

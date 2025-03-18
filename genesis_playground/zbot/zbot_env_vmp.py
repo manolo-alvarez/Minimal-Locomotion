@@ -26,6 +26,7 @@ class ZbotEnvVMP(ZbotEnv):
             "joint_vel_weight": 0.2   # Weight for joint velocity tracking
         })
         
+
         super().__init__(num_envs, env_cfg, obs_cfg, reward_cfg, command_cfg, 
                         show_viewer=show_viewer, device=device)
         
@@ -55,6 +56,7 @@ class ZbotEnvVMP(ZbotEnv):
         
         # Load VAE model if provided
         if vae_model_path:
+            print(f"Loading VAE model from {vae_model_path}")
             self.vae = self._load_vae(vae_model_path)
             self.vae.eval()
             self._init_motion_reference()
@@ -326,33 +328,14 @@ class ZbotEnvVMP(ZbotEnv):
                 reconstructed_window = reconstructed_window.reshape(1, self.motion_window_size, self.motion_dim)
                 
                 # Plot comparison
-                import matplotlib.pyplot as plt
-                plt.figure(figsize=(12, 6))
-                for j in range(3):
-                    plt.subplot(3, 2, 2*j+1)
-                    plt.plot(original_window[0, :, j], label='Original')
-                    plt.plot(reconstructed_window[0, :, j], label='Reconstructed')
-                    plt.title(f"Joint {j} Position")
-                    plt.legend()
-                    
-                    plt.subplot(3, 2, 2*j+2)
-                    vel_idx = j + len(self.env_cfg["selected_joints"])
-                    plt.plot(original_window[0, :, vel_idx], label='Original')
-                    plt.plot(reconstructed_window[0, :, vel_idx], label='Reconstructed')
-                    plt.title(f"Joint {j} Velocity")
-                    plt.legend()
-                
-                plt.tight_layout()
-                plt.savefig(f"vae_reconstruction_{self.step_count}.png")
-                plt.close()
-        
+               
         # Get current frame as motion reference
         self.current_m = new_window[self.window_size].clone()
         
         return new_window
 
     def reset(self):
-        # Reset step counter
+    # Reset step counter
         self.step_count = 0
         
         # Call parent reset
@@ -362,11 +345,46 @@ class ZbotEnvVMP(ZbotEnv):
         if self.vae:
             self.current_window = self._sample_next_frame()
             
-            # Validate window shape
-            assert self.current_window.ndim == 2, "Window must be 2D"
-            assert self.current_window.shape[0] == self.motion_window_size, "Incorrect window length"
+            # Important: Set initial pose close to reference
+            ref_pos = self.current_m[:len(self.env_cfg["selected_joints"])].clone()
             
-            self.current_m = self.current_window[self.window_size]  # Current frame
+            try:
+                # Properly denormalize the reference position
+                if hasattr(self, 'motion_scaler'):
+                    # Create a properly shaped array with zeros for velocity components
+                    motion_dim = self.motion_dim
+                    full_ref = torch.zeros(motion_dim, device=self.device)
+                    full_ref[:len(self.env_cfg["selected_joints"])] = ref_pos
+                    
+                    # Reshape for scaler
+                    full_ref_np = full_ref.cpu().numpy().reshape(1, -1)
+                    ref_denorm = self.motion_scaler.inverse_transform(full_ref_np)
+                    ref_pos = torch.from_numpy(ref_denorm).float().to(self.device)[0, :len(self.env_cfg["selected_joints"])]
+                
+                # Set initial pose to reference with minimal noise
+                small_noise = torch.randn_like(self.dof_pos) * 0.01
+                self.dof_pos = ref_pos.unsqueeze(0).expand(self.num_envs, -1) + small_noise
+                
+                # Also set initial velocities to reference velocities
+                ref_vel = self.current_m[len(self.env_cfg["selected_joints"]):].clone()
+                if hasattr(self, 'motion_scaler'):
+                    # Create velocity reference
+                    full_ref = torch.zeros(motion_dim, device=self.device)
+                    full_ref[len(self.env_cfg["selected_joints"]):] = ref_vel
+                    
+                    # Denormalize velocities
+                    full_ref_np = full_ref.cpu().numpy().reshape(1, -1)
+                    ref_denorm = self.motion_scaler.inverse_transform(full_ref_np)
+                    ref_vel = torch.from_numpy(ref_denorm).float().to(self.device)[0, len(self.env_cfg["selected_joints"]):]
+                
+                # Set initial velocities with minimal noise
+                small_vel_noise = torch.randn_like(self.dof_vel) * 0.01
+                self.dof_vel = ref_vel.unsqueeze(0).expand(self.num_envs, -1) + small_vel_noise
+            except Exception as e:
+                print(f"Error setting initial pose: {e}")
+                # Fallback: use default pose with small noise
+                small_noise = torch.randn_like(self.dof_pos) * 0.01
+                self.dof_pos = self.default_dof_pos.clone().unsqueeze(0).expand(self.num_envs, -1) + small_noise
             
             self.populate_observation_buffers()
         
@@ -561,14 +579,23 @@ class ZbotEnvVMP(ZbotEnv):
         if not self.vae:
             return torch.zeros(self.num_envs, device=self.device)
         
-        # Get reference values from motion frame
+        # Get reference values
         ref_pos = self.current_m[:len(self.env_cfg["selected_joints"])]
+        ref_vel = self.current_m[len(self.env_cfg["selected_joints"]):]
         
-        # Focus on just joint positions first
+        # Joint position tracking (weighted more heavily for stability)
         joint_pos_error = torch.sum((self.dof_pos - ref_pos.unsqueeze(0))**2, dim=1)
         
-        # Use a soft exponential reward instead of direct error
-        tracking_reward = torch.exp(-5.0 * joint_pos_error)
+        # Base orientation stability (penalize tilting)
+        orientation_error = torch.sum(self.base_euler[:, :2]**2, dim=1)  # Only x and y (roll and pitch)
+        
+        # Velocity tracking (for smoother motion)
+        vel_error = torch.sum((self.dof_vel - ref_vel.unsqueeze(0))**2, dim=1)
+        
+        # Combined tracking reward with stability emphasis
+        tracking_reward = torch.exp(-5.0 * joint_pos_error) * \
+                        torch.exp(-10.0 * orientation_error) * \
+                        torch.exp(-2.0 * vel_error)
         
         return tracking_reward
 
@@ -676,24 +703,27 @@ class ZbotEnvVMP(ZbotEnv):
         
     #     return total_reward, reward_info
     def compute_reward(self):
-        # Simplified reward computation
+        # Different reward components
         motion_tracking = self._reward_motion_tracking()
-        alive_bonus = torch.ones(self.num_envs, device=self.device) * 10.0  # Fixed value for debugging
+        orientation_stability = torch.exp(-10.0 * torch.sum(self.base_euler[:, :2]**2, dim=1))
+        height_stability = torch.exp(-20.0 * torch.abs(self.base_pos[:, 2] - 0.41))  # 0.41 is expected height
         
-        # Scale and combine
-        total_reward = motion_tracking * 5.0 + alive_bonus
+        # Combine rewards with appropriate weights
+        total_reward = motion_tracking * 5.0 + \
+                    orientation_stability * 3.0 + \
+                    height_stability * 2.0
         
-        # Log raw components
-        print(f"Raw motion tracking: {motion_tracking.mean().item():.4f}")
-        print(f"Raw alive bonus: {alive_bonus.mean().item():.4f}")
-        print(f"Total reward: {total_reward.mean().item():.4f}")
+        # Add a strong alive bonus that gradually decays
+        alive_bonus = 10.0 * torch.exp(-0.001 * self.episode_length_buf)
+        total_reward += alive_bonus
         
         return total_reward, {
             "motion_tracking": motion_tracking.mean().item() * 5.0,
+            "orientation_stability": orientation_stability.mean().item() * 3.0,
+            "height_stability": height_stability.mean().item() * 2.0,
             "alive_bonus": alive_bonus.mean().item(),
             "total_reward": total_reward.mean().item()
         }
-
 
     # def compute_reward(self):
     #     """Compute all rewards including base rewards and motion tracking"""
