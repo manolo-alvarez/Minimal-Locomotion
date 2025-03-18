@@ -12,7 +12,7 @@ import shutil
 import wandb
 from datetime import datetime
 
-from zbot_env import ZbotEnv
+from zbot_env_v2 import ZbotEnv2
 
 import genesis as gs
 
@@ -47,7 +47,7 @@ def get_train_cfg(exp_name, max_iterations, device="mps"):
         # training
         "steps": max_iterations * 48 * 100,  # Convert iterations to steps
         "batch_size": 256,
-        "reward_coef": 3,
+        "reward_coef": 30,
         "value_coef": 3,
         "consistency_coef": 600,
         "rho": 0.5,
@@ -96,7 +96,7 @@ def get_train_cfg(exp_name, max_iterations, device="mps"):
         "simnorm_dim": 8,
         
         # logging
-        "wandb_project": "TDMPC2",
+        "wandb_project": "PPO",
         "wandb_entity": None,
         "wandb_silent": False,
         "enable_wandb": True,  # We'll handle wandb separately
@@ -131,28 +131,28 @@ def get_env_cfg():
         # joint/link names
         # NOTE: hip roll/yaw flipped between sim & real robot FIXME
         "default_joint_angles": {  # [rad]
-            "R_Hip_Pitch": 0.0,
-            "L_Hip_Pitch": 0.0,
-            "R_Hip_Yaw": 0.0,
-            "L_Hip_Yaw": 0.0,
-            "R_Hip_Roll": 0.0,
-            "L_Hip_Roll": 0.0,
-            "R_Knee_Pitch": 0.0,
-            "L_Knee_Pitch": 0.0,
-            "R_Ankle_Pitch": 0.0,
-            "L_Ankle_Pitch": 0.0,
+            "right_hip_pitch": 0.0,
+            "left_hip_pitch": 0.0,
+            "right_hip_yaw": 0.0,
+            "left_hip_yaw": 0.0,
+            "right_hip_roll": 0.0,
+            "left_hip_roll": 0.0,
+            "right_knee": 0.0,
+            "left_knee": 0.0,
+            "right_ankle": 0.0,
+            "left_ankle": 0.0,
         },
         "dof_names": [
-            "R_Hip_Pitch",
-            "L_Hip_Pitch",
-            "R_Hip_Yaw",
-            "L_Hip_Yaw",
-            "R_Hip_Roll",
-            "L_Hip_Roll",
-            "R_Knee_Pitch",
-            "L_Knee_Pitch",
-            "R_Ankle_Pitch",
-            "L_Ankle_Pitch",
+            "right_hip_pitch",
+            "left_hip_pitch",
+            "right_hip_yaw",
+            "left_hip_yaw",
+            "right_hip_roll",
+            "left_hip_roll",
+            "right_knee",
+            "left_knee",
+            "right_ankle",
+            "left_ankle",
         ],
         # friction
         "env_friction_range": {
@@ -285,7 +285,7 @@ def main():
         os.makedirs(log_dir, exist_ok=True)
 
     # Create Genesis ZBot environment
-    zbot_env = ZbotEnv(
+    zbot_env = ZbotEnv2(
         num_envs=args.num_envs, 
         env_cfg=env_cfg, 
         obs_cfg=obs_cfg, 

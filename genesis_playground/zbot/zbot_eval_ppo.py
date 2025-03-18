@@ -621,7 +621,7 @@ def main():
                       help="Number of rollouts to evaluate")
     parser.add_argument("--random_commands", action="store_true", default=False,
                       help="Use random commands for evaluation")
-    parser.add_argument("--urdf_ver", type=str, default="v1",
+    parser.add_argument("--urdf_ver", type=str, default="v2",
                       help="Use random commands for evaluation")
     args = parser.parse_args()
 
@@ -766,7 +766,7 @@ def main():
                 env, 
                 policy, 
                 num_samples=args.analysis_samples * 2,  # Collect more samples for gait analysis
-                seed=args.analysis_seed,
+                seed=1,
                 device=args.device
             )
             

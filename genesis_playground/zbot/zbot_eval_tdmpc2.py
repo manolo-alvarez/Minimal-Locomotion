@@ -7,6 +7,7 @@ import numpy as np
 import torch
 import pygame 
 from zbot_env import ZbotEnv
+from zbot_env_v2 import ZbotEnv2
 from rsl_rl.runners import OnPolicyRunner
 from policy_analyzer import PolicyAnalyzer  # Add this import at the module level
 import random
@@ -745,6 +746,8 @@ def main():
                       help="Number of rollouts to evaluate")
     parser.add_argument("--random_commands", action="store_true", default=False,
                       help="Use random commands for evaluation")
+    parser.add_argument("--urdf_ver", type=str, default="v2",
+                      help="Use random commands for evaluation")
     parser.add_argument("--max_iterations", type=int, default=300)
     args = parser.parse_args()
 
@@ -769,15 +772,26 @@ def main():
     }
 
     # Create environment with show_viewer=True directly
-    env = ZbotEnv(
-        num_envs=1,
-        env_cfg=env_cfg,
-        obs_cfg=obs_cfg,
-        reward_cfg=reward_cfg,
-        command_cfg=command_cfg,
-        show_viewer=args.show_viewer,  # Set viewer directly
-        device = args.device
-    )
+    if args.urdf_ver == "v1":    
+        env = ZbotEnv(
+            num_envs=1,
+            env_cfg=env_cfg,
+            obs_cfg=obs_cfg,
+            reward_cfg=reward_cfg,
+            command_cfg=command_cfg,
+            show_viewer=args.show_viewer,  # Set viewer directly
+            device = args.device
+        )
+    else:
+        env = ZbotEnv2(
+            num_envs=1,
+            env_cfg=env_cfg,
+            obs_cfg=obs_cfg,
+            reward_cfg=reward_cfg,
+            command_cfg=command_cfg,
+            show_viewer=args.show_viewer,  # Set viewer directly
+            device = args.device
+        )
 
 # From TDMPC2
     tdmpc2_cfg = DotDict(get_train_cfg(args.exp_name, args.max_iterations, args.device))

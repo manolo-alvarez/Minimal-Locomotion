@@ -225,7 +225,7 @@ class Logger:
 		assert category in CAT_TO_COLOR.keys(), f"invalid category: {category}"
 		if self._wandb:
 			if category in {"train", "eval"}:
-				xkey = "step"
+				xkey = "episode"
 			elif category == "pretrain":
 				xkey = "iteration"
 			_d = dict()
@@ -233,7 +233,7 @@ class Logger:
 				_d[category + "/" + k] = v
 			self._wandb.log(_d, step=d[xkey])
 		if category == "eval" and self._save_csv:
-			keys = ["step", "episode_reward"]
+			keys = ["episode", "full_reward"]
 			self._eval.append(np.array([d[keys[0]], d[keys[1]]]))
 			pd.DataFrame(np.array(self._eval)).to_csv(
 				self._log_dir+"/eval.csv", header=keys, index=None

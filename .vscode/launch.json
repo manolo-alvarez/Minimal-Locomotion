@@ -68,8 +68,7 @@
                 "-e", "zbot-tdmpc2_test", 
                 "--num_envs", "1",
                 "--device", "mps",
-                "--use_wandb", "False",
-                "--show_viewer", "True"
+                "--use_wandb", "True"
             ]
         },
         {

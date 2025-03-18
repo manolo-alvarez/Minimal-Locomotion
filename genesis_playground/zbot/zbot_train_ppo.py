@@ -147,7 +147,13 @@ def get_cfgs():
             "dof_vel": 0.05,
         },
         # Include names of observations to exclude from the actor observations
-        "obs_exclusions": []
+        "obs_exclusions": [
+            "dof_pos_left_hip_yaw",
+            "dof_pos_right_hip_yaw",
+            "dof_vel_right_knee",
+            "dof_vel_right_hip_yaw",
+            "dof_left_hip_pitch_action"
+        ]
     }
     reward_cfg = {
         "tracking_sigma": 0.25,

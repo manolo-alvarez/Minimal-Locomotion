@@ -47,7 +47,7 @@ class OnlineTrainer(Trainer):
 			if self.cfg.save_video:
 				self.logger.video.save(self._step)
 		return dict(
-			episode_reward=np.nanmean(ep_rewards),
+			full_reward=np.nanmean(ep_rewards),
 			#episode_success=np.nanmean(ep_successes),
 		)
 
@@ -87,8 +87,14 @@ class OnlineTrainer(Trainer):
 
 				if self._step > 0:
 					train_metrics.update(
-						episode_reward=torch.tensor([td['reward'] for td in self._tds[1:]]).sum(),
-						#episode_success=info['episode']['rew_tracking_lin_vel'],
+						full_reward=torch.tensor([td['reward'] for td in self._tds[1:]]).sum(),
+						rew_tracking_lin_vel=info['episode']['rew_tracking_lin_vel'],
+						rew_tracking_ang_vel=info['episode']['rew_tracking_ang_vel'],
+						rew_lin_vel_z=info['episode']['rew_lin_vel_z'],
+						rew_base_height=info['episode']['rew_base_height'],
+						rew_action_rate=info['episode']['rew_action_rate'],
+						rew_similar_to_default=info['episode']['rew_similar_to_default'],
+						rew_feet_air_time=info['episode']['rew_feet_air_time'],
 					)
 					train_metrics.update(self.common_metrics())
 					self.logger.log(train_metrics, 'train')
