@@ -671,14 +671,14 @@ def main():
         obs_cfg=obs_cfg,
         reward_cfg=reward_cfg,
         command_cfg=command_cfg,
-        vae_model_path="genesis_playground/zbot/models/ws15_ld64_beta0.05_run7/model.pth",  # Ensure your trained VAE model is loaded
+        vae_model_path="genesis_playground/zbot/models/ws15_ld64_beta0.05_run6/model.pth",  # Ensure your trained VAE model is loaded
         show_viewer=args.show_viewer,
         device=args.device
     )
 
     
     # Load your trained policy
-    policy_path = "vmp_logs/run_new_zbot_2/final_model.pth"  # Ensure this matches your trained model path
+    policy_path = "vmp_logs/run_new_zbot_new_vmp/final_model.pth"  # Ensure this matches your trained model path
     checkpoint = torch.load(policy_path, map_location=args.device)
 
     print(f'env.num_obs:{env.num_obs}')
