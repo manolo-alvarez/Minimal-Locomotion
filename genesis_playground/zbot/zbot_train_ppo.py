@@ -16,6 +16,7 @@ from zbot_env import ZbotEnv
 from rsl_rl.runners import OnPolicyRunner
 
 import genesis as gs
+from parse_urdf import parse_urdf_joint_limits
 
 
 def get_train_cfg(exp_name, max_iterations):
@@ -35,7 +36,7 @@ def get_train_cfg(exp_name, max_iterations):
             "entropy_coef": 0.01,
             "gamma": 0.99,
             "lam": 0.95,
-            "learning_rate": 0.001,
+            "learning_rate": 0.0005,
             "max_grad_norm": 1.0,
             "num_learning_epochs": 5,
             "num_mini_batches": 4,
@@ -83,28 +84,28 @@ def get_cfgs():
         # joint/link names
         # NOTE: hip roll/yaw flipped between sim & real robot FIXME
         "default_joint_angles": {  # [rad]
-            "R_Hip_Pitch": 0.0,
-            "L_Hip_Pitch": 0.0,
-            "R_Hip_Yaw": 0.0,
-            "L_Hip_Yaw": 0.0,
-            "R_Hip_Roll": 0.0,
-            "L_Hip_Roll": 0.0,
-            "R_Knee_Pitch": 0.0,
-            "L_Knee_Pitch": 0.0,
-            "R_Ankle_Pitch": 0.0,
-            "L_Ankle_Pitch": 0.0,
+            "right_hip_pitch": 0.0,
+            "left_hip_pitch": 0.0,
+            "right_hip_yaw": 0.0,
+            "left_hip_yaw": 0.0,
+            "right_hip_roll": 0.0,
+            "left_hip_roll": 0.0,
+            "right_knee": 0.0,
+            "left_knee": 0.0,
+            "right_ankle": 0.0,
+            "left_ankle": 0.0,
         },
         "dof_names": [
-            "R_Hip_Pitch",
-            "L_Hip_Pitch",
-            "R_Hip_Yaw",
-            "L_Hip_Yaw",
-            "R_Hip_Roll",
-            "L_Hip_Roll",
-            "R_Knee_Pitch",
-            "L_Knee_Pitch",
-            "R_Ankle_Pitch",
-            "L_Ankle_Pitch",
+            "right_hip_pitch",
+            "left_hip_pitch",
+            "right_hip_yaw",
+            "left_hip_yaw",
+            "right_hip_roll",
+            "left_hip_roll",
+            "right_knee",
+            "left_knee",
+            "right_ankle",
+            "left_ankle",
         ],
         # friction
         "env_friction_range": {
@@ -125,8 +126,9 @@ def get_cfgs():
         "kp_multipliers": [0.75, 1.25],
         "kd_multipliers": [0.75, 1.25],
         # termination
-        "termination_if_roll_greater_than": 10,  # degree
-        "termination_if_pitch_greater_than": 10,
+        "termination_if_roll_greater_than": 45,  # degree
+        "termination_if_pitch_greater_than": 45,
+        "random_start_chance": 0.2,
         # base pose
         "base_init_pos": [0.0, 0.0, 0.41],
         "base_init_quat": [1.0, 0.0, 0.0, 0.0],
@@ -150,17 +152,24 @@ def get_cfgs():
         "obs_exclusions": []
     }
     reward_cfg = {
-        "tracking_sigma": 0.25,
+        "tracking_sigma": 1,
         "base_height_target": 0.3,
         "feet_height_target": 0.075,
+        "moving_avg_for_lin_vel_tacking": True,
+        "use_old_rewards": False,
+        "lin_vel_moving_avg_alpha": 0.182,
+        "moving_avg_for_ang_vel_tacking": True,
+        "ang_vel_moving_avg_alpha": 0.182,
         "reward_scales": {
-            "tracking_lin_vel": 1.0,
+            "tracking_lin_vel": 5.0,
             "tracking_ang_vel": 0.2,
             "lin_vel_z": -1.0,
             "base_height": -50.0,
             "action_rate": -0.005,
             "similar_to_default": -0.1,
-            "feet_air_time": 5.0,
+            "gait_symmetry": 0.0,
+            "energy_efficiency": 0.0,
+            "feet_air_time": 0.0,
         },
     }
     command_cfg = {
@@ -201,9 +210,14 @@ def main():
     
     gs.init(logging_level="warning")
 
+    old_urdf ="genesis_playground/resources/zbot/robot_fixed.urdf"
+    new_urdf = "/Users/lucianogonzalez/.kscale/robots/zbot-v2-fixed/robot/robot.urdf"
+    joint_limits = parse_urdf_joint_limits(new_urdf)
+
     log_dir = f"{args.log_dir}/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, command_cfg = get_cfgs()
     train_cfg = get_train_cfg(args.exp_name, args.max_iterations)
+    env_cfg["joint_limits"] = joint_limits
 
     if not args.from_checkpoint:
         if os.path.exists(log_dir):

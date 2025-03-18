@@ -9,6 +9,7 @@ import pygame
 from zbot_env import ZbotEnv
 from rsl_rl.runners import OnPolicyRunner
 from policy_analyzer import PolicyAnalyzer  # Add this import at the module level
+from parse_urdf import parse_urdf_joint_limits
 import random
 
 import genesis as gs
@@ -186,7 +187,7 @@ def run_sim(env, policy_fn, obs, use_keyboard=False, base_policy=None, screen=No
                         fixed_cmd = get_random_command()
                         print(f"New command: x={fixed_cmd['x']:.2f}, y={fixed_cmd['y']:.2f}, yaw={fixed_cmd['yaw']:.2f}")
                 else:
-                    fixed_cmd = {"x": 0.2, "y": 0.0, "yaw": 0.0}
+                    fixed_cmd = {"x": 0.4, "y": 0.0, "yaw": 0.0}
                 # Apply command and use policy
                 modified_obs = obs.clone()
                 modified_obs[:, 6] = fixed_cmd["x"]
@@ -624,13 +625,23 @@ def main():
 
     gs.init()
 
+    old_urdf ="genesis_playground/resources/zbot/robot_fixed.urdf"
+    new_urdf = "genesis_playground/resources/zbot_new/robot.urdf"
+    joint_limits = parse_urdf_joint_limits(new_urdf)
+
     log_dir = f"{args.log_dir}/{args.exp_name}"
     env_cfg, obs_cfg, reward_cfg, command_cfg, train_cfg = pickle.load(open(f"{args.log_dir}/{args.exp_name}/cfgs.pkl", "rb"))
-
+    env_cfg["joint_limits"] = joint_limits
+    env_cfg["random_start_chance"] = 0.0
     reward_cfg = {
         "tracking_sigma": 0.25,
         "base_height_target": 0.3,
         "feet_height_target": 0.075,
+        "moving_avg_for_lin_vel_tacking": False,
+        "use_old_rewards": True,
+        "lin_vel_moving_avg_alpha": 0.182,
+        "moving_avg_for_ang_vel_tacking": False,
+        "ang_vel_moving_avg_alpha": 0.182,
         "reward_scales": {
             "tracking_lin_vel": 1.0,
             "tracking_ang_vel": 0.2,
